@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Generate the synthetic evidence and policy dataset as deterministic SQL.
+
+Emits `db/seed.sql`. No database connection is required to run this, which
+keeps the data layer reviewable without standing infrastructure up first.
+
+Deliberately seeds EVIDENCE AND POLICY ONLY. Decision records are not seeded:
+they must be produced by the real decision path so that a reviewer can see the
+pipeline create them rather than take our word for it. See README, "Bootstrap
+the demo decisions".
+
+The dataset is entirely fictional. `North Star` is not a real title and none of
+the rights, clearance, rating or delivery facts describe a real contractual or
+regulatory condition in any territory.
+
+Three revisions tell the whole product story:
+
+  rev 1  (2026-07-01)  Clean. Everything clears for Nigeria.
+  rev 2  (2026-08-05)  The music sync window is corrected: it ends 2026-07-31,
+                       not 2027-06-01. Business time moves; the past does not.
+  rev 3  (2026-08-06)  The Nigeria grant is restated as AVOD-only, BACKDATED to
+                       the original commencement. This is the important one:
+                       it changes what the answer would have been on a date
+                       already decided. A decision pinned at rev 1 must still
+                       replay as AVAILABLE, and the comparison view must be
+                       able to say the correction would have produced HOLD
+                       without touching the original record.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+TITLE = "NORTHSTAR-S01E06"
+TERRITORY = "NG"
+
+# --- policy -----------------------------------------------------------------
+
+POLICY_REVISION = "POL-2026.07"
+POLICY_EFFECTIVE_AT = "2026-07-01 00:00:00.000"
+POLICY_RECORDED_AT = "2026-06-24 14:10:00.000"
+
+# Rules are data, not code, so that a decision can bind to a hash of them.
+# Ordering is significant: the first matching blocking rule is the reported
+# cause, which keeps the "exact blocking condition" in the UI stable.
+POLICY_RULES = {
+    "policy_revision": POLICY_REVISION,
+    "release_path": "SVOD",
+    "rules": [
+        {
+            "id": "LIC-001",
+            "requires": "an active licence covering the territory and effective date",
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "LIC-002",
+            "requires": "the licence rights scope to include the release path",
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "CLR-001",
+            "requires": "every clearance of a mandatory kind to be active on the effective date",
+            "mandatory_kinds": ["MUSIC_SYNC", "MUSIC_MASTER", "STOCK_FOOTAGE", "TALENT"],
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "RTG-001",
+            "requires": "a valid, unexpired rating certificate for the territory",
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "DLV-001",
+            "requires": "final delivery approval with captions approved",
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "CNT-001",
+            "requires": "no continuity exception of BLOCKING severity left OPEN",
+            "outcome_when_unmet": "HOLD",
+        },
+        {
+            "id": "ESC-001",
+            "requires": "facts for every enabled rule to be present and non-contradictory",
+            "outcome_when_unmet": "ESCALATE",
+        },
+    ],
+}
+
+
+def canonical_json(payload: dict) -> str:
+    """Stable serialization. The hash binding depends on this being exact."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def sha256_of(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# --- evidence ---------------------------------------------------------------
+
+# (license_id, territory, scope, valid_from, valid_to, status, revision, recorded_at, note)
+LICENSES = [
+    (
+        "LIC-NG-0091", TERRITORY, "SVOD",
+        "2026-06-01 00:00:00.000", "2027-06-01 00:00:00.000", "ACTIVE",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+    (
+        "LIC-NG-0091", TERRITORY, "AVOD",
+        "2026-06-01 00:00:00.000", "2027-06-01 00:00:00.000", "ACTIVE",
+        3, "2026-08-06 16:45:00.000",
+        "Territory grant restated as AVOD-only per amendment 3; applies from original commencement.",
+    ),
+]
+
+# (clearance_id, asset_ref, kind, valid_from, valid_to, status, revision, recorded_at, note)
+CLEARANCES = [
+    (
+        "CLR-MS-0031", "Midnight Drive", "MUSIC_SYNC",
+        "2026-06-01 00:00:00.000", "2027-06-01 00:00:00.000", "ACTIVE",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+    (
+        "CLR-MS-0031", "Midnight Drive", "MUSIC_SYNC",
+        "2026-06-01 00:00:00.000", "2026-07-31 00:00:00.000", "ACTIVE",
+        2, "2026-08-05 11:20:00.000",
+        "Sync term corrected against executed cue sheet; window ends 2026-07-31.",
+    ),
+    (
+        "CLR-MM-0032", "Midnight Drive", "MUSIC_MASTER",
+        "2026-06-01 00:00:00.000", "2027-06-01 00:00:00.000", "ACTIVE",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+    (
+        "CLR-TL-0033", "Ensemble cast — episode 6", "TALENT",
+        "2026-05-15 00:00:00.000", "2029-05-15 00:00:00.000", "ACTIVE",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+    (
+        "CLR-SF-0034", "Aerial plate, harbour at dusk", "STOCK_FOOTAGE",
+        "2026-05-15 00:00:00.000", "2031-05-15 00:00:00.000", "ACTIVE",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+]
+
+# (rating_id, rating_code, issued_at, expires_at, status, revision, recorded_at, note)
+RATINGS = [
+    (
+        "RTG-NG-0007", "15", "2026-05-20 00:00:00.000", "2028-05-20 00:00:00.000",
+        "VALID", 1, "2026-07-01 09:00:00.000", "",
+    ),
+]
+
+# (delivery_id, master_version, approved_at, captions, audio_description, revision, recorded_at, note)
+DELIVERIES = [
+    (
+        "DLV-0004", "v1.2", "2026-05-28 17:30:00.000", "APPROVED", "APPROVED",
+        1, "2026-07-01 09:00:00.000", "",
+    ),
+]
+
+# (exception_id, scene_ref, severity, state, resolution_ref, revision, recorded_at, note)
+CONTINUITY = [
+    (
+        "EXC-0012", "Sc. 41 — wardrobe, grey coat", "ADVISORY", "RESOLVED",
+        "Reshoot 2026-04-18", 1, "2026-07-01 09:00:00.000", "",
+    ),
+    (
+        "EXC-0019", "Sc. 63 — prop continuity, wristwatch", "ADVISORY", "WAIVED",
+        "Accepted by post supervisor", 1, "2026-07-01 09:00:00.000", "",
+    ),
+]
+
+
+def q(value: str) -> str:
+    """Single-quote a SQL string literal."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def build_sql() -> str:
+    out: list[str] = []
+    add = out.append
+
+    add("-- Generated by db/seed.py — do not edit by hand.")
+    add("-- Synthetic data. `North Star` is fictional; no fact here describes a")
+    add("-- real contractual or regulatory condition in any territory.")
+    add("")
+    add("INSERT INTO sdl.title_licenses")
+    add("(license_id, title_id, territory_code, rights_scope, valid_from, valid_to, status, revision, recorded_at, amendment_note) VALUES")
+    rows = [
+        f"({q(lid)}, {q(TITLE)}, {q(terr)}, {q(scope)}, {q(vf)}, {q(vt)}, {q(st)}, {rev}, {q(rec)}, {q(note)})"
+        for lid, terr, scope, vf, vt, st, rev, rec, note in LICENSES
+    ]
+    add(",\n".join(rows) + ";")
+    add("")
+
+    add("INSERT INTO sdl.clearances")
+    add("(clearance_id, title_id, asset_ref, clearance_kind, territory_code, valid_from, valid_to, status, revision, recorded_at, amendment_note) VALUES")
+    rows = [
+        f"({q(cid)}, {q(TITLE)}, {q(asset)}, {q(kind)}, {q(TERRITORY)}, {q(vf)}, {q(vt)}, {q(st)}, {rev}, {q(rec)}, {q(note)})"
+        for cid, asset, kind, vf, vt, st, rev, rec, note in CLEARANCES
+    ]
+    add(",\n".join(rows) + ";")
+    add("")
+
+    add("INSERT INTO sdl.ratings")
+    add("(rating_id, title_id, territory_code, rating_code, issued_at, expires_at, status, revision, recorded_at, amendment_note) VALUES")
+    rows = [
+        f"({q(rid)}, {q(TITLE)}, {q(TERRITORY)}, {q(code)}, {q(iss)}, {q(exp)}, {q(st)}, {rev}, {q(rec)}, {q(note)})"
+        for rid, code, iss, exp, st, rev, rec, note in RATINGS
+    ]
+    add(",\n".join(rows) + ";")
+    add("")
+
+    add("INSERT INTO sdl.deliveries")
+    add("(delivery_id, title_id, master_version, approved_at, captions_state, audio_description_state, revision, recorded_at, amendment_note) VALUES")
+    rows = [
+        f"({q(did)}, {q(TITLE)}, {q(mv)}, {q(app)}, {q(cap)}, {q(ad)}, {rev}, {q(rec)}, {q(note)})"
+        for did, mv, app, cap, ad, rev, rec, note in DELIVERIES
+    ]
+    add(",\n".join(rows) + ";")
+    add("")
+
+    add("INSERT INTO sdl.continuity_exceptions")
+    add("(exception_id, title_id, scene_ref, severity, state, resolution_ref, revision, recorded_at, amendment_note) VALUES")
+    rows = [
+        f"({q(eid)}, {q(TITLE)}, {q(scene)}, {q(sev)}, {q(state)}, {q(res)}, {rev}, {q(rec)}, {q(note)})"
+        for eid, scene, sev, state, res, rev, rec, note in CONTINUITY
+    ]
+    add(",\n".join(rows) + ";")
+    add("")
+
+    payload = canonical_json(POLICY_RULES)
+    add("INSERT INTO sdl.policy_revisions")
+    add("(policy_revision, rules_payload, payload_sha256, effective_at, recorded_at) VALUES")
+    add(
+        f"({q(POLICY_REVISION)}, {q(payload)}, {q(sha256_of(payload))}, "
+        f"{q(POLICY_EFFECTIVE_AT)}, {q(POLICY_RECORDED_AT)});"
+    )
+    add("")
+
+    return "\n".join(out)
+
+
+def main() -> None:
+    target = Path(__file__).parent / "seed.sql"
+    target.write_text(build_sql(), encoding="utf-8")
+    payload = canonical_json(POLICY_RULES)
+    print(f"wrote {target}")
+    print(f"policy {POLICY_REVISION} sha256={sha256_of(payload)}")
+
+
+if __name__ == "__main__":
+    main()
