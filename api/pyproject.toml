@@ -1,0 +1,17 @@
+[project]
+name = "sdl-api"
+version = "0.1.0"
+description = "Studio Decision Ledger — decision service"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
