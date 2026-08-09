@@ -37,6 +37,25 @@ the moment of deciding*, and can prove it.
   proof that the model's reasoning is reproducible. A deterministic policy
   evaluator, separate from the model, produces the result.
 
+### The ablation
+
+Any system can claim its audit trail is meaningful. This one can show the
+counterfactual. `POST /api/decisions/{id}/ablate` runs the same verifier twice
+against the same record — once with the evidence binding, once with it withheld:
+
+```
+WITH binding    : C2
+    Reproduced AVAILABLE from the pinned evidence at revision 1 under POL-2026.07.
+
+WITHOUT binding : NOT_CERTIFIED | snapshot binding
+    Decision D-1846 names snapshot RS-2026-07-30-0001, which is not available.
+```
+
+The outcome, the reasoning and the timestamp are all still there. Only the
+binding is gone, and that alone is enough for the record to stop being evidence
+of anything. The endpoint is read-only: an ablation that mutated a record to
+make its point would be the exact failure it exists to warn about.
+
 ### Capability classes
 
 | Class | Meaning |

@@ -95,6 +95,20 @@ export function verifyDecision(decisionId: string): Promise<VerificationPayload>
   });
 }
 
+export interface AblationPayload {
+  decision_id: string;
+  withheld: string;
+  with_binding: VerificationPayload;
+  without_binding: VerificationPayload;
+  explanation: string;
+}
+
+export function ablateDecision(decisionId: string): Promise<AblationPayload> {
+  return request<AblationPayload>(`/api/decisions/${decisionId}/ablate`, {
+    method: "POST",
+  });
+}
+
 export function compareDecision(decisionId: string): Promise<ComparisonPayload> {
   return request<ComparisonPayload>(`/api/decisions/${decisionId}/compare`);
 }

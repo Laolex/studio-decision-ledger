@@ -18,11 +18,13 @@ import {
 import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 
 import {
+  ablateDecision,
   compareDecision,
   formatDate,
   getDecision,
   recordDecision,
   verifyDecision,
+  type AblationPayload,
   type ComparisonPayload,
   type DecisionPayload,
   type EvidenceGroup,
@@ -82,6 +84,9 @@ export default function App() {
 
   const [showMemo, setShowMemo] = useState(false);
 
+  const [showAblation, setShowAblation] = useState(false);
+  const [ablation, setAblation] = useState<AblationPayload | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     getDecision(DEMO_DECISION_ID)
@@ -114,6 +119,12 @@ export default function App() {
       .catch((error: Error) => setReplayError(error.message))
       .finally(() => setReplaying(false));
   }, [decision]);
+
+  const openAblation = useCallback(() => {
+    setShowAblation(true);
+    if (!decision || ablation) return;
+    ablateDecision(decision.decision_id).then(setAblation).catch(() => undefined);
+  }, [decision, ablation]);
 
   const openCompare = useCallback(() => {
     setShowCompare(true);
@@ -366,6 +377,9 @@ export default function App() {
               <button className="text-button" onClick={() => setShowReplay(true)}>
                 Open verifier <ArrowRight size={15} />
               </button>
+              <button className="text-button" onClick={openAblation}>
+                Test the binding <ArrowRight size={15} />
+              </button>
               <button className="text-button">
                 Manifest {decision.source_manifest_hash.slice(0, 12)}… <Launch size={14} />
               </button>
@@ -461,6 +475,47 @@ export default function App() {
                   view never writes to the record.
                 </span>
               </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={showAblation}
+        modalHeading="What is this record worth without its binding?"
+        primaryButtonText="Close"
+        secondaryButtonText="Close"
+        onRequestSubmit={() => setShowAblation(false)}
+        onRequestClose={() => setShowAblation(false)}
+      >
+        <div className="modal-copy">
+          {!ablation && <InlineLoading description="Running the verifier twice…" />}
+          {ablation && (
+            <>
+              <p>
+                The same verifier, run twice against {ablation.decision_id}. The second run
+                withholds one thing: the {ablation.withheld}.
+              </p>
+              <div className="verification-state success">
+                <CheckmarkFilled size={20} />
+                <span>
+                  <b>With the binding — {ablation.with_binding.capability_class}.</b>{" "}
+                  {ablation.with_binding.detail}
+                </span>
+              </div>
+              <div className="verification-state warning">
+                <ErrorFilled size={20} />
+                <span>
+                  <b>
+                    Without it — {ablation.without_binding.capability_class}
+                    {ablation.without_binding.failed_requirement
+                      ? ` (${ablation.without_binding.failed_requirement})`
+                      : ""}.
+                  </b>{" "}
+                  {ablation.without_binding.detail}
+                </span>
+              </div>
+              <p>{ablation.explanation}</p>
             </>
           )}
         </div>

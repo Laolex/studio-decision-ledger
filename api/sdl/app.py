@@ -185,6 +185,46 @@ def create_app() -> FastAPI:
             "detail": result.detail,
         }
 
+    @app.post("/api/decisions/{decision_id}/ablate")
+    def ablate_decision(decision_id: str, executor=Depends(get_executor)) -> dict:
+        """Show what this decision is worth without its evidence binding.
+
+        Runs the same verifier twice: once with the snapshot, once with it
+        withheld. Read-only — an ablation that mutated the record to make its
+        point would be the exact failure it exists to warn about.
+        """
+        record = read_decision(executor, decision_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"no decision {decision_id}")
+        snapshot = read_snapshot(executor, record.snapshot_id)
+        try:
+            policy, _sha = read_policy(executor, record.policy_revision)
+        except KeyError:
+            policy = None
+
+        bound = verify(record, snapshot, policy, executor)
+        unbound = verify(record, None, policy, executor)
+
+        return {
+            "decision_id": decision_id,
+            "withheld": "snapshot binding",
+            "with_binding": {
+                "capability_class": bound.capability_class,
+                "failed_requirement": bound.failed_requirement,
+                "detail": bound.detail,
+            },
+            "without_binding": {
+                "capability_class": unbound.capability_class,
+                "failed_requirement": unbound.failed_requirement,
+                "detail": unbound.detail,
+            },
+            "explanation": (
+                "The outcome, the reasoning and the timestamp are all still present. "
+                "Only the binding to the evidence is gone — and that is enough for the "
+                "record to stop being evidence of anything."
+            ),
+        }
+
     @app.get("/api/decisions/{decision_id}/compare")
     def compare_decision(decision_id: str, executor=Depends(get_executor)) -> dict:
         record = read_decision(executor, decision_id)
