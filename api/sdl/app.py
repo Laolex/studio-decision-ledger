@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from sdl.canonical import canonical_rows
@@ -282,6 +283,15 @@ def create_app() -> FastAPI:
             # keeps the console honest about what it is showing.
             "record_unchanged": True,
         }
+
+    # The built console is served from the same origin as the API, so the
+    # client's relative /api paths need no proxy and no CORS in production.
+    # Mounted last: API routes are matched first, and this catches the rest.
+    console_dist = Path(__file__).resolve().parent.parent.parent / "dist"
+    if console_dist.is_dir():
+        app.mount(
+            "/", StaticFiles(directory=str(console_dist), html=True), name="console"
+        )
 
     return app
 
