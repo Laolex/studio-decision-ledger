@@ -149,9 +149,20 @@ def make_decision(
     effective_at: datetime,
     policy_revision: str = DEFAULT_POLICY_REVISION,
     now: datetime | None = None,
+    max_revision: int | None = None,
+    decision_id: str | None = None,
+    snapshot_id: str | None = None,
 ) -> RecordedDecision:
+    """Record a decision.
+
+    `max_revision` pins the decision to the evidence knowable at a given point
+    in system time. Left unset it means "everything known now", which is the
+    ordinary case. Setting it is how a decision taken before a correction is
+    recorded — not a test affordance, but the situation the product exists for.
+    """
     now = now or datetime.now(timezone.utc)
-    max_revision = current_max_revision(executor, title_id)
+    if max_revision is None:
+        max_revision = current_max_revision(executor, title_id)
     policy, policy_sha256 = read_policy(executor, policy_revision)
 
     facts, evidence = resolve_facts(executor, title_id, territory_code, max_revision)
@@ -164,10 +175,10 @@ def make_decision(
     )
 
     snapshot = build_snapshot(
-        evidence, _timestamp_id("RS", now), now, max_revision=max_revision
+        evidence, snapshot_id or _timestamp_id("RS", now), now, max_revision=max_revision
     )
     record = DecisionRecord(
-        decision_id=_timestamp_id("D", now),
+        decision_id=decision_id or _timestamp_id("D", now),
         title_id=title_id,
         territory_code=territory_code,
         effective_at=effective_at,

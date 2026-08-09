@@ -128,8 +128,26 @@ npm run dev
 ### Bootstrap the demo decisions
 
 Decision records are deliberately **not** seeded. They are produced by running
-the real decision path, so that a reviewer can watch the pipeline create them
-rather than take our word for it.
+the real decision path, so a reviewer can watch the pipeline create them rather
+than take our word for it.
+
+```bash
+python3 db/bootstrap_demo.py --verify
+```
+
+This records two decisions that ask the *same question about the same date*:
+
+| | Taken | Pinned at | Outcome |
+|---|---|---|---|
+| `D-1846` | 30 Jul | revision 1 | `AVAILABLE` |
+| `D-1847` | 8 Aug | revision 3 | `HOLD` · `LIC-002` |
+
+Both replay to `C2`. Neither is wrong. `D-1846` answers what was knowable on 30
+July; `D-1847` answers the same question after the grant was restated as
+AVOD-only with retroactive effect. Keeping those two answers apart, and being
+able to prove each one, is the entire product.
+
+Re-running is safe — existing decisions are left alone rather than duplicated.
 
 ## Status
 

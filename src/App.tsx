@@ -20,6 +20,7 @@ import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 import {
   compareDecision,
   formatDate,
+  getDecision,
   recordDecision,
   verifyDecision,
   type ComparisonPayload,
@@ -32,6 +33,12 @@ import {
 const TITLE_ID = "NORTHSTAR-S01E06";
 const TERRITORY = "NG";
 const EFFECTIVE_AT = "2026-07-30T00:00:00Z";
+
+// The console opens on the decision taken before the corrections landed. Its
+// record says AVAILABLE; current evidence would now say HOLD. Showing a freshly
+// minted decision instead would pin to current data, and the record could never
+// disagree with the present — which is the one thing worth seeing.
+const DEMO_DECISION_ID = "D-1846";
 
 const GROUP_ICONS: Record<string, ReactElement> = {
   "Rights & clearances": <Document size={18} aria-hidden="true" />,
@@ -77,11 +84,16 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    recordDecision({
-      title_id: TITLE_ID,
-      territory_code: TERRITORY,
-      effective_at: EFFECTIVE_AT,
-    })
+    getDecision(DEMO_DECISION_ID)
+      .catch(() =>
+        // Not bootstrapped yet — record one against current evidence so the
+        // console still works on a fresh database.
+        recordDecision({
+          title_id: TITLE_ID,
+          territory_code: TERRITORY,
+          effective_at: EFFECTIVE_AT,
+        }),
+      )
       .then((payload) => {
         if (!cancelled) setDecision(payload);
       })

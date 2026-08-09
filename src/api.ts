@@ -85,6 +85,10 @@ export function recordDecision(input: {
   });
 }
 
+export function getDecision(decisionId: string): Promise<DecisionPayload> {
+  return request<DecisionPayload>(`/api/decisions/${decisionId}`);
+}
+
 export function verifyDecision(decisionId: string): Promise<VerificationPayload> {
   return request<VerificationPayload>(`/api/decisions/${decisionId}/verify`, {
     method: "POST",
