@@ -141,8 +141,8 @@ Honest state of the build:
 - [x] Deterministic policy evaluator (11 tests)
 - [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
 - [ ] Gemini agent on Google Cloud Agent Builder
-- [ ] Decision-record write path
-- [ ] Replay verifier
+- [x] Decision-record write path
+- [x] Replay verifier (39 tests)
 - [ ] Current-vs-historical comparison surface
 - [ ] Hosted deployment
 

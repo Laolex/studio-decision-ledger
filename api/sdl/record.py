@@ -25,6 +25,30 @@ TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 
 @dataclass(frozen=True)
+class DecisionRecord:
+    """An immutable decision. A correction is a new record naming `supersedes`.
+
+    `model_rationale` is stored apart from `rule_hits` on purpose: it is an
+    artifact of the explanation, never a determinant of the outcome.
+    """
+
+    decision_id: str
+    title_id: str
+    territory_code: str
+    effective_at: datetime
+    policy_revision: str
+    policy_sha256: str
+    snapshot_id: str
+    outcome: str
+    rule_hits: list[str]
+    decided_at: datetime
+    model_rationale: str = ""
+    model_config: str = ""
+    prompt_template_revision: str = ""
+    supersedes: str = ""
+
+
+@dataclass(frozen=True)
 class EvidenceSnapshot:
     snapshot_id: str
     captured_at: datetime
