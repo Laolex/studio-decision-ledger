@@ -108,11 +108,11 @@ Generate the seed SQL (no database connection required):
 python3 db/seed.py
 ```
 
-Apply schema and seed to a ClickHouse instance:
+Apply schema and seed to a ClickHouse instance (reads `api/.env`):
 
 ```bash
-clickhouse-client --multiquery < db/schema.sql
-clickhouse-client --multiquery < db/seed.sql
+python3 db/apply.py db/schema.sql
+python3 db/apply.py db/seed.sql
 ```
 
 Web console:
