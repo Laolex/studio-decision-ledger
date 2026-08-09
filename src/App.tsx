@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import {
   ArrowRight,
   CheckmarkFilled,
@@ -15,47 +15,31 @@ import {
   Time,
   WarningFilled,
 } from "@carbon/icons-react";
-import { Button, Modal, Tag } from "@carbon/react";
+import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 
-type ReplayState = "idle" | "running" | "verified";
+import {
+  compareDecision,
+  formatDate,
+  recordDecision,
+  verifyDecision,
+  type ComparisonPayload,
+  type DecisionPayload,
+  type EvidenceGroup,
+  type Tone,
+  type VerificationPayload,
+} from "./api";
 
-const evidence = [
-  {
-    icon: <Document size={18} aria-hidden="true" />,
-    label: "Rights & clearances",
-    summary: "1 blocking condition",
-    tone: "hold",
-    items: [
-      ["Series licence", "Active through 31 Dec 2027", "clear"],
-      ["Music cue: Midnight Drive", "Expired 31 Jul 2026", "hold"],
-      ["Territory restriction", "Nigeria permitted", "clear"],
-    ],
-  },
-  {
-    icon: <TaskComplete size={18} aria-hidden="true" />,
-    label: "Delivery & continuity",
-    summary: "Ready to release",
-    tone: "clear",
-    items: [
-      ["Final master", "Approved · IMF v7", "clear"],
-      ["Continuity exceptions", "0 unresolved", "clear"],
-      ["Accessibility package", "Captions and audio description ready", "clear"],
-    ],
-  },
-  {
-    icon: <Settings size={18} aria-hidden="true" />,
-    label: "Release policy",
-    summary: "Revision 3.4 applied",
-    tone: "clear",
-    items: [
-      ["Territory rating", "15+ certificate valid", "clear"],
-      ["Business rule", "No expired music clearance", "hold"],
-      ["Policy revision", "Distribution policy v3.4", "clear"],
-    ],
-  },
-];
+const TITLE_ID = "NORTHSTAR-S01E06";
+const TERRITORY = "NG";
+const EFFECTIVE_AT = "2026-07-30T00:00:00Z";
 
-function StatusMark({ tone }: { tone: string }) {
+const GROUP_ICONS: Record<string, ReactElement> = {
+  "Rights & clearances": <Document size={18} aria-hidden="true" />,
+  "Delivery & continuity": <TaskComplete size={18} aria-hidden="true" />,
+  "Release policy": <Settings size={18} aria-hidden="true" />,
+};
+
+function StatusMark({ tone }: { tone: Tone }) {
   return tone === "hold" ? (
     <WarningFilled className="status-icon hold" size={16} aria-label="Needs attention" />
   ) : (
@@ -63,16 +47,110 @@ function StatusMark({ tone }: { tone: string }) {
   );
 }
 
+function outcomeHeadline(outcome: string): string {
+  if (outcome === "AVAILABLE") return "Cleared for release";
+  if (outcome === "ESCALATE") return "Send for human review";
+  return "Hold for clearance review";
+}
+
+function outcomeCopy(outcome: string): string {
+  if (outcome === "AVAILABLE")
+    return "Every mandatory release condition is met for this territory and date. The evidence behind this decision is pinned and can be replayed after the underlying data changes.";
+  if (outcome === "ESCALATE")
+    return "The facts on file are incomplete or contradictory, so no safe determination is possible. This is deliberately not a hold: the policy is declining to assert something the evidence does not support.";
+  return "A mandatory release condition is not met. The release stays paused until the blocking condition is resolved or an approved exception is recorded.";
+}
+
 export default function App() {
-  const [replayState, setReplayState] = useState<ReplayState>("idle");
+  const [decision, setDecision] = useState<DecisionPayload | null>(null);
+  const [loadError, setLoadError] = useState<string>("");
+
   const [showReplay, setShowReplay] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const [verification, setVerification] = useState<VerificationPayload | null>(null);
+  const [replayError, setReplayError] = useState("");
+
   const [showCompare, setShowCompare] = useState(false);
+  const [comparison, setComparison] = useState<ComparisonPayload | null>(null);
+
   const [showMemo, setShowMemo] = useState(false);
 
-  function runReplay() {
-    setReplayState("running");
-    window.setTimeout(() => setReplayState("verified"), 900);
+  useEffect(() => {
+    let cancelled = false;
+    recordDecision({
+      title_id: TITLE_ID,
+      territory_code: TERRITORY,
+      effective_at: EFFECTIVE_AT,
+    })
+      .then((payload) => {
+        if (!cancelled) setDecision(payload);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setLoadError(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const runReplay = useCallback(() => {
+    if (!decision) return;
+    setReplaying(true);
+    setReplayError("");
+    verifyDecision(decision.decision_id)
+      .then(setVerification)
+      .catch((error: Error) => setReplayError(error.message))
+      .finally(() => setReplaying(false));
+  }, [decision]);
+
+  const openCompare = useCallback(() => {
+    setShowCompare(true);
+    if (!decision || comparison) return;
+    compareDecision(decision.decision_id).then(setComparison).catch(() => undefined);
+  }, [decision, comparison]);
+
+  useEffect(() => {
+    if (!decision) return;
+    compareDecision(decision.decision_id).then(setComparison).catch(() => undefined);
+  }, [decision]);
+
+  if (loadError) {
+    return (
+      <main className="shell">
+        <section className="content" id="top">
+          <div className="page-head">
+            <div>
+              <p className="eyebrow">Release gate</p>
+              <h1>Cannot reach the decision service</h1>
+              <p className="subtitle">{loadError}</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
   }
+
+  if (!decision) {
+    return (
+      <main className="shell">
+        <section className="content" id="top">
+          <div className="page-head">
+            <div>
+              <p className="eyebrow">Release gate</p>
+              <h1>Resolving evidence…</h1>
+              <p className="subtitle">
+                Retrieving pinned rights, clearance, rating and delivery facts.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  const groups: EvidenceGroup[] = decision.evidence_groups;
+  const gateTone = decision.outcome === "AVAILABLE" ? "green" : "red";
+  const drifted = (comparison?.differences.length ?? 0) > 0;
 
   return (
     <main className="shell">
@@ -112,10 +190,12 @@ export default function App() {
           <div>
             <p className="eyebrow">Release gate</p>
             <h1>North Star</h1>
-            <p className="subtitle">Season 1 · Episode 6 · Nigeria · 8 August 2026</p>
+            <p className="subtitle">
+              Season 1 · Episode 6 · Nigeria · {formatDate(decision.effective_at)}
+            </p>
           </div>
           <div className="head-actions">
-            <Button kind="tertiary" renderIcon={Time} onClick={() => setShowCompare(true)}>Compare current state</Button>
+            <Button kind="tertiary" renderIcon={Time} onClick={openCompare}>Compare current state</Button>
             <Button renderIcon={PlayFilledAlt} onClick={() => setShowReplay(true)}>Replay decision</Button>
           </div>
         </div>
@@ -125,14 +205,23 @@ export default function App() {
           <div className="decision-content">
             <div>
               <p className="eyebrow">Current release decision</p>
-              <h2 id="decision-title">Hold for clearance review</h2>
-              <p className="decision-copy">A music-rights window expired after the title was last approved. The release remains paused until clearance is renewed or the cue is replaced.</p>
-              <div className="reason-line"><WarningFilled size={18} /><span><b>Blocking condition:</b> Midnight Drive, scene 04:12-04:45, expired 31 July 2026.</span></div>
+              <h2 id="decision-title">{outcomeHeadline(decision.outcome)}</h2>
+              <p className="decision-copy">{outcomeCopy(decision.outcome)}</p>
+              {decision.blocking_condition && (
+                <div className="reason-line">
+                  <WarningFilled size={18} />
+                  <span><b>Blocking condition:</b> {decision.blocking_condition}</span>
+                </div>
+              )}
             </div>
             <div className="gate-panel" aria-label="Release status">
               <span className="gate-label">Release gate</span>
-              <span className="gate-value">HOLD</span>
-              <span className="gate-note">1 issue needs review</span>
+              <span className="gate-value">{decision.outcome}</span>
+              <span className="gate-note">
+                {decision.rule_hits.length === 0
+                  ? "No blocking conditions"
+                  : `${decision.rule_hits.length} issue${decision.rule_hits.length > 1 ? "s" : ""} need review`}
+              </span>
             </div>
           </div>
         </section>
@@ -140,37 +229,89 @@ export default function App() {
         <section className="drift-section" id="queue" aria-labelledby="drift-title">
           <div className="drift-intro">
             <p className="eyebrow">Decision Drift Radar</p>
-            <h2 id="drift-title">This release changed after approval.</h2>
-            <p>The release gate is monitored for material rights, policy, rating, and delivery changes. Only changes that alter a release condition appear here.</p>
-            <button className="text-button" onClick={() => setShowCompare(true)}>Review the current evidence <ArrowRight size={15} /></button>
+            <h2 id="drift-title">
+              {drifted ? "This release changed after approval." : "No material change since this decision."}
+            </h2>
+            <p>
+              The release gate is monitored for material rights, policy, rating and delivery
+              changes. Only changes that alter a release condition appear here.
+            </p>
+            <button className="text-button" onClick={openCompare}>
+              Review the current evidence <ArrowRight size={15} />
+            </button>
           </div>
           <article className="drift-card">
-            <div className="drift-card-head"><div><span className="drift-kicker"><WarningFilled size={15} /> Action required</span><h3>Clearance changed</h3></div><Tag type="red">Release at risk</Tag></div>
-            <div className="timeline" aria-label="Decision drift timeline">
-              <div className="timeline-event complete"><span className="timeline-dot"><CheckmarkFilled size={14} /></span><div><b>30 Jul · Approved</b><p>D-1846 recorded AVAILABLE from a valid rights snapshot.</p></div></div>
-              <div className="timeline-event active"><span className="timeline-dot"><WarningFilled size={14} /></span><div><b>31 Jul · Clearance expired</b><p>Music cue Midnight Drive is no longer covered for Nigeria.</p></div></div>
-              <div className="timeline-event"><span className="timeline-dot"><Time size={14} /></span><div><b>08 Aug · Release hold</b><p>D-1847 requires a reviewer before the scheduled availability date.</p></div></div>
+            <div className="drift-card-head">
+              <div>
+                <span className="drift-kicker">
+                  {drifted ? <WarningFilled size={15} /> : <CheckmarkFilled size={15} />}
+                  {drifted ? " Action required" : " Stable"}
+                </span>
+                <h3>{drifted ? "Evidence changed" : "Evidence unchanged"}</h3>
+              </div>
+              <Tag type={drifted ? "red" : "green"}>
+                {drifted ? "Release at risk" : "In line with record"}
+              </Tag>
             </div>
-            <div className="drift-actions"><Button kind="secondary" renderIcon={Document} onClick={() => setShowMemo(true)}>Draft escalation memo</Button><button className="text-button">Assign review <ArrowRight size={15} /></button></div>
+            <div className="timeline" aria-label="Decision drift timeline">
+              <div className="timeline-event complete">
+                <span className="timeline-dot"><CheckmarkFilled size={14} /></span>
+                <div>
+                  <b>{formatDate(decision.decided_at)} · Recorded</b>
+                  <p>
+                    {decision.decision_id} recorded {decision.outcome} from evidence pinned at
+                    revision {decision.max_revision}.
+                  </p>
+                </div>
+              </div>
+              {comparison?.differences.map((difference) => (
+                <div className="timeline-event active" key={difference}>
+                  <span className="timeline-dot"><WarningFilled size={14} /></span>
+                  <div><b>Current data</b><p>{difference}</p></div>
+                </div>
+              ))}
+              {!drifted && comparison && (
+                <div className="timeline-event">
+                  <span className="timeline-dot"><Time size={14} /></span>
+                  <div>
+                    <b>Current data</b>
+                    <p>Current evidence still produces {comparison.current.outcome} for this date.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="drift-actions">
+              <Button kind="secondary" renderIcon={Document} onClick={() => setShowMemo(true)}>
+                Draft escalation memo
+              </Button>
+              <button className="text-button">Assign review <ArrowRight size={15} /></button>
+            </div>
           </article>
         </section>
 
         <div className="section-heading">
           <div><p className="eyebrow">Bound evidence</p><h2>Everything used to make this decision</h2></div>
-          <span className="snapshot-chip"><Locked size={14} /> Snapshot RS-2026-08-08-0142</span>
+          <span className="snapshot-chip"><Locked size={14} /> Snapshot {decision.snapshot_id}</span>
         </div>
 
         <section className="evidence-grid" id="evidence" aria-label="Decision evidence">
-          {evidence.map((group) => (
+          {groups.map((group) => (
             <article className="evidence-panel" key={group.label}>
               <div className="evidence-head">
-                <div className="evidence-title"><span className="source-icon">{group.icon}</span><h3>{group.label}</h3></div>
+                <div className="evidence-title">
+                  <span className="source-icon">{GROUP_ICONS[group.label]}</span>
+                  <h3>{group.label}</h3>
+                </div>
                 <Tag type={group.tone === "hold" ? "red" : "green"}>{group.summary}</Tag>
               </div>
               <div className="evidence-list">
-                {group.items.map(([name, value, tone]) => <div className="evidence-row" key={name}><StatusMark tone={tone} /><div><b>{name}</b><span>{value}</span></div></div>)}
+                {group.items.map((item) => (
+                  <div className="evidence-row" key={item.name}>
+                    <StatusMark tone={item.tone} />
+                    <div><b>{item.name}</b><span>{item.value}</span></div>
+                  </div>
+                ))}
               </div>
-              <button className="text-button">Inspect evidence <ArrowRight size={15} /></button>
             </article>
           ))}
         </section>
@@ -179,44 +320,162 @@ export default function App() {
           <div className="record-intro">
             <p className="eyebrow">Decision record</p>
             <h2>A receipt, not a summary.</h2>
-            <p>Each decision binds the outcome to the evidence and policy available at that moment. A later change cannot silently rewrite the record.</p>
+            <p>
+              Each decision binds the outcome to the evidence and policy available at that
+              moment. A later change cannot silently rewrite the record.
+            </p>
           </div>
           <article className="record-card">
-            <div className="record-header"><div><span className="record-number">D-1847</span><h3>Can North Star be available in Nigeria today?</h3></div><Tag type="red">HOLD</Tag></div>
-            <div className="record-meta"><span><Time size={15} /> Recorded 08 Aug 2026, 14:32 UTC</span><span><FlashFilled size={15} /> Policy engine v3.4</span></div>
-            <div className="record-proof">
-              <div><span>Evidence binding</span><b>Snapshot RS-2026-08-08-0142</b></div>
-              <div><span>Capability class</span><b className="verified-text">C2 · reproducible</b></div>
-              <div><span>Decision inputs</span><b>6 query results · 3 policy checks</b></div>
+            <div className="record-header">
+              <div>
+                <span className="record-number">{decision.decision_id}</span>
+                <h3>Can North Star be available in Nigeria on {formatDate(decision.effective_at)}?</h3>
+              </div>
+              <Tag type={gateTone}>{decision.outcome}</Tag>
             </div>
-            <div className="record-actions"><button className="text-button" onClick={() => setShowReplay(true)}>Open verifier <ArrowRight size={15} /></button><button className="text-button">View evidence manifest <Launch size={14} /></button></div>
+            <div className="record-meta">
+              <span><Time size={15} /> Recorded {formatDate(decision.decided_at)}</span>
+              <span><FlashFilled size={15} /> Policy {decision.policy_revision}</span>
+            </div>
+            <div className="record-proof">
+              <div><span>Evidence binding</span><b>Snapshot {decision.snapshot_id}</b></div>
+              <div>
+                <span>Capability class</span>
+                <b className={verification?.capability_class === "NOT_CERTIFIED" ? "" : "verified-text"}>
+                  {verification ? verification.capability_class : "Not yet replayed"}
+                </b>
+              </div>
+              <div>
+                <span>Decision inputs</span>
+                <b>{decision.retrieval_count} pinned retrievals · revision {decision.max_revision}</b>
+              </div>
+            </div>
+            <div className="record-actions">
+              <button className="text-button" onClick={() => setShowReplay(true)}>
+                Open verifier <ArrowRight size={15} />
+              </button>
+              <button className="text-button">
+                Manifest {decision.source_manifest_hash.slice(0, 12)}… <Launch size={14} />
+              </button>
+            </div>
           </article>
         </section>
       </section>
 
       <Modal
         open={showReplay}
-        modalHeading="Replay decision D-1847"
-        primaryButtonText={replayState === "verified" ? "Verified" : replayState === "running" ? "Replaying" : "Run replay"}
+        modalHeading={`Replay decision ${decision.decision_id}`}
+        primaryButtonText={replaying ? "Replaying" : verification ? "Replay again" : "Run replay"}
         secondaryButtonText="Close"
-        primaryButtonDisabled={replayState !== "idle"}
+        primaryButtonDisabled={replaying}
         onRequestSubmit={runReplay}
-        onRequestClose={() => { setShowReplay(false); setReplayState("idle"); }}
+        onRequestClose={() => setShowReplay(false)}
       >
         <div className="modal-copy">
-          <p>This verifier will query the bound snapshot, apply Distribution Policy v3.4, and compare the replayed outcome to the original record.</p>
-          {replayState === "idle" && <div className="verification-state neutral"><Locked size={20} /><span>Snapshot RS-2026-08-08-0142 is immutable and available.</span></div>}
-          {replayState === "running" && <div className="verification-state pending"><Time size={20} /><span>Replaying bound evidence and policy checks…</span></div>}
-          {replayState === "verified" && <div className="verification-state success"><CheckmarkFilled size={20} /><span><b>C2 certified.</b> The policy engine reproduced HOLD from the bound evidence.</span></div>}
+          <p>
+            The verifier re-issues every pinned query against snapshot {decision.snapshot_id},
+            re-applies policy {decision.policy_revision}, and compares the replayed outcome to
+            the record. It reports a capability class, never a confidence score.
+          </p>
+
+          {!verification && !replaying && !replayError && (
+            <div className="verification-state neutral">
+              <Locked size={20} />
+              <span>Snapshot {decision.snapshot_id} is immutable and available.</span>
+            </div>
+          )}
+
+          {replaying && (
+            <div className="verification-state pending">
+              <InlineLoading description="Re-issuing pinned queries and re-applying policy…" />
+            </div>
+          )}
+
+          {replayError && (
+            <div className="verification-state warning">
+              <ErrorFilled size={20} />
+              <span><b>Verifier unavailable.</b> {replayError}</span>
+            </div>
+          )}
+
+          {verification?.capability_class === "NOT_CERTIFIED" && (
+            <div className="verification-state warning">
+              <ErrorFilled size={20} />
+              <span>
+                <b>Not certified — {verification.failed_requirement}.</b> {verification.detail}
+              </span>
+            </div>
+          )}
+
+          {verification && verification.capability_class !== "NOT_CERTIFIED" && (
+            <div className="verification-state success">
+              <CheckmarkFilled size={20} />
+              <span>
+                <b>{verification.capability_class} certified.</b> {verification.detail}
+              </span>
+            </div>
+          )}
         </div>
       </Modal>
 
-      <Modal open={showCompare} modalHeading="Current state differs from the record" primaryButtonText="Open current evidence" secondaryButtonText="Close" onRequestSubmit={() => setShowCompare(false)} onRequestClose={() => setShowCompare(false)}>
-        <div className="modal-copy"><p>The original decision record remains intact. Current data now shows a renewed series licence, but the music cue is still expired.</p><div className="verification-state warning"><ErrorFilled size={20} /><span>Current state cannot replace the snapshot used by D-1847.</span></div></div>
+      <Modal
+        open={showCompare}
+        modalHeading="Current state beside the record"
+        primaryButtonText="Close"
+        secondaryButtonText="Close"
+        onRequestSubmit={() => setShowCompare(false)}
+        onRequestClose={() => setShowCompare(false)}
+      >
+        <div className="modal-copy">
+          {!comparison && <InlineLoading description="Resolving current evidence…" />}
+          {comparison && (
+            <>
+              <p>
+                The record stands at <b>{comparison.historical.outcome}</b>, pinned to revision{" "}
+                {comparison.historical.max_revision}. Current evidence is at revision{" "}
+                {comparison.current.max_revision} and would produce{" "}
+                <b>{comparison.current.outcome}</b> for the same date.
+              </p>
+              {comparison.differences.map((difference) => (
+                <div className="verification-state warning" key={difference}>
+                  <WarningFilled size={20} />
+                  <span>{difference}</span>
+                </div>
+              ))}
+              <div className="verification-state neutral">
+                <Locked size={20} />
+                <span>
+                  Current state cannot replace the snapshot used by {decision.decision_id}. This
+                  view never writes to the record.
+                </span>
+              </div>
+            </>
+          )}
+        </div>
       </Modal>
 
-      <Modal open={showMemo} modalHeading="Clearance escalation memo" primaryButtonText="Copy memo" secondaryButtonText="Close" onRequestSubmit={() => setShowMemo(false)} onRequestClose={() => setShowMemo(false)}>
-        <div className="modal-copy"><p><b>Subject:</b> North Star S1E6: clearance renewal needed for Nigeria</p><p>The release gate changed to HOLD on 8 August because the Midnight Drive music clearance expired on 31 July. Please confirm renewal, replacement, or an approved exception before the scheduled release.</p><div className="verification-state neutral"><Document size={20} /><span>Draft grounded in decision D-1847, snapshot RS-2026-08-08-0142, and Distribution Policy v3.4.</span></div></div>
+      <Modal
+        open={showMemo}
+        modalHeading="Clearance escalation memo"
+        primaryButtonText="Copy memo"
+        secondaryButtonText="Close"
+        onRequestSubmit={() => setShowMemo(false)}
+        onRequestClose={() => setShowMemo(false)}
+      >
+        <div className="modal-copy">
+          <p><b>Subject:</b> North Star S1E6 — release gate {decision.outcome} for Nigeria</p>
+          <p>
+            {decision.blocking_condition ||
+              "No blocking condition is recorded against this decision."}
+          </p>
+          <div className="verification-state neutral">
+            <Document size={20} />
+            <span>
+              Grounded in decision {decision.decision_id}, snapshot {decision.snapshot_id}, and
+              policy {decision.policy_revision}.
+            </span>
+          </div>
+        </div>
       </Modal>
     </main>
   );

@@ -137,13 +137,13 @@ Honest state of the build:
 
 - [x] Bitemporal ClickHouse schema
 - [x] Deterministic synthetic dataset generator
-- [x] Web console — currently a UI sketch against mocked data
+- [x] Web console — wired to the live API (no mocked data)
 - [x] Deterministic policy evaluator (11 tests)
 - [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
 - [ ] Gemini agent on Google Cloud Agent Builder
 - [x] Decision-record write path
 - [x] Replay verifier (39 tests)
-- [ ] Current-vs-historical comparison surface
+- [x] Current-vs-historical comparison surface
 - [ ] Hosted deployment
 
 ## Licence
