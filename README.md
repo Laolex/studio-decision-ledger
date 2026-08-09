@@ -50,8 +50,10 @@ the moment of deciding*, and can prove it.
 Both required integrations are load-bearing, not decorative:
 
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing
-  agent. It interprets the request, orchestrates evidence retrieval, identifies
-  missing facts, and explains the outcome in plain language.
+  agent: it interprets the request, orchestrates evidence retrieval, identifies
+  missing facts, and explains the outcome in plain language. **Not yet built** —
+  see Status. The deterministic path below is complete and does not depend on
+  it, by design: the model explains decisions, it never determines them.
 - **ClickHouse MCP server** — every decision-relevant fact is retrieved through
   the ClickHouse MCP server at runtime. The canonical query text and result
   hash from each MCP interaction are written into the decision record. There is
