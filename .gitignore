@@ -9,3 +9,5 @@ db/seed.sql
 __pycache__/
 *.pyc
 .pytest_cache/
+*.swp
+*.swo
