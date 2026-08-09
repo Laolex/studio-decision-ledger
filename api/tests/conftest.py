@@ -66,3 +66,27 @@ def http_executor(clickhouse_env):
         return canonical_rows([json.loads(line) for line in body.splitlines() if line])
 
     return execute
+
+
+@pytest.fixture(scope="session")
+def writer(clickhouse_env):
+    """Execute a write statement. Writes never travel over MCP — see SPEC
+    invariant 13; the ledger is written by the application service alone."""
+
+    host = clickhouse_env["CLICKHOUSE_HOST"]
+    port = clickhouse_env.get("CLICKHOUSE_PORT", "8443")
+    credentials = b64encode(
+        f"{clickhouse_env['CLICKHOUSE_USER']}:{clickhouse_env['CLICKHOUSE_PASSWORD']}".encode()
+    ).decode()
+
+    def execute(sql: str) -> None:
+        request = urllib.request.Request(
+            f"https://{host}:{port}/",
+            data=sql.encode("utf-8"),
+            headers={"Authorization": f"Basic {credentials}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            response.read()
+
+    return execute
