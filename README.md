@@ -97,6 +97,9 @@ correction would now produce `HOLD` — without touching the original record.
 ```
 db/schema.sql   ClickHouse schema, bitemporal, append-only
 db/seed.py      deterministic synthetic-data generator -> db/seed.sql
+db/apply.py     apply a .sql file over the ClickHouse HTTPS interface
+api/sdl/        decision service: evaluator, retrieval, resolution, MCP client
+api/tests/      tests, run against a real ClickHouse service
 src/            React + Vite web console
 ```
 
@@ -136,7 +139,7 @@ Honest state of the build:
 - [x] Deterministic synthetic dataset generator
 - [x] Web console — currently a UI sketch against mocked data
 - [x] Deterministic policy evaluator (11 tests)
-- [ ] ClickHouse MCP retrieval and query-evidence capture
+- [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
 - [ ] Gemini agent on Google Cloud Agent Builder
 - [ ] Decision-record write path
 - [ ] Replay verifier

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from sdl.canonical import canonical_rows
+
 ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT / ".env"
 
@@ -61,6 +63,6 @@ def http_executor(clickhouse_env):
         )
         with urllib.request.urlopen(request, timeout=60) as response:
             body = response.read().decode("utf-8").strip()
-        return [json.loads(line) for line in body.splitlines() if line]
+        return canonical_rows([json.loads(line) for line in body.splitlines() if line])
 
     return execute
