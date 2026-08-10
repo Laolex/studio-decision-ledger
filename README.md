@@ -70,8 +70,9 @@ Both required integrations are load-bearing, not decorative:
 
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing
   agent: it interprets the request, orchestrates evidence retrieval, identifies
-  missing facts, and explains the outcome in plain language. **Not yet built** —
-  see Status. The deterministic path below is complete and does not depend on
+  missing facts, and explains the outcome in plain language. The explanation step
+  runs on Gemini via Vertex AI today; the ADK agent that orchestrates retrieval
+  and identifies missing facts is **not yet built** — see Status. The deterministic path below is complete and does not depend on
   it, by design: the model explains decisions, it never determines them.
 - **ClickHouse MCP server** — every decision-relevant fact is retrieved through
   the ClickHouse MCP server at runtime. The canonical query text and result
@@ -179,7 +180,8 @@ Honest state of the build:
 - [x] Web console — wired to the live API (no mocked data)
 - [x] Deterministic policy evaluator (11 tests)
 - [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
-- [ ] Gemini agent on Google Cloud Agent Builder
+- [x] Gemini rationale model on Vertex AI, behind the model seam (7 tests)
+- [ ] ADK agent on Vertex AI Agent Engine — orchestration and missing-fact identification
 - [x] Decision-record write path
 - [x] Replay verifier (39 tests)
 - [x] Current-vs-historical comparison surface
