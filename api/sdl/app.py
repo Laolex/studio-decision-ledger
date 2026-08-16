@@ -25,7 +25,12 @@ from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPExecutor
 from sdl.resolve import resolve_facts
-from sdl.service import blocking_condition, evidence_groups, make_decision
+from sdl.service import (
+    blocking_condition,
+    evidence_groups,
+    make_decision,
+    preview_decision,
+)
 from sdl.verifier import verify
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -150,6 +155,44 @@ def create_app() -> FastAPI:
         return _decision_payload(
             recorded.record, recorded.snapshot, recorded.decision, recorded.facts
         )
+
+    @app.post("/api/evidence")
+    def preview_evidence(
+        body: DecisionRequestBody,
+        executor=Depends(get_executor),
+    ) -> dict:
+        """Answer a release question without recording a decision.
+
+        This is what the operator-facing agent reaches. It takes no writer, so
+        an agent cannot leave a receipt in the ledger as a side effect of an
+        operator thinking out loud. Recording is a deliberate act performed by
+        a person through `POST /api/decisions`.
+        """
+        effective_at = body.effective_at
+        if effective_at.tzinfo is None:
+            effective_at = effective_at.replace(tzinfo=timezone.utc)
+        previewed = preview_decision(
+            executor,
+            title_id=body.title_id,
+            territory_code=body.territory_code,
+            effective_at=effective_at,
+            policy_revision=body.policy_revision,
+        )
+        return {
+            "title_id": body.title_id,
+            "territory_code": body.territory_code,
+            "effective_at": effective_at.isoformat(),
+            "outcome": previewed.decision.outcome,
+            "rule_hits": list(previewed.decision.rule_hits),
+            "blocking_condition": blocking_condition(previewed.decision),
+            "policy_revision": previewed.policy_revision,
+            "max_revision": previewed.max_revision,
+            "retrieval_count": len(previewed.evidence),
+            "recorded": False,
+            "evidence_groups": evidence_groups(
+                previewed.facts, previewed.decision, previewed.policy_revision
+            ),
+        }
 
     @app.get("/api/decisions/{decision_id}")
     def get_decision(decision_id: str, executor=Depends(get_executor)) -> dict:
@@ -287,7 +330,16 @@ def create_app() -> FastAPI:
     # The built console is served from the same origin as the API, so the
     # client's relative /api paths need no proxy and no CORS in production.
     # Mounted last: API routes are matched first, and this catches the rest.
-    console_dist = Path(__file__).resolve().parent.parent.parent / "dist"
+    # SDL_CONSOLE_DIR wins so the container can say where the built console
+    # lives. Walking up three parents only works when the package is run from
+    # a source checkout; in an image the package is installed and `dist` sits
+    # somewhere unrelated to site-packages.
+    console_dist = Path(
+        os.environ.get(
+            "SDL_CONSOLE_DIR",
+            Path(__file__).resolve().parent.parent.parent / "dist",
+        )
+    )
     if console_dist.is_dir():
         app.mount(
             "/", StaticFiles(directory=str(console_dist), html=True), name="console"

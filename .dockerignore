@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.venv
+api/.venv
+api/.env
+.env
+**/__pycache__
+**/*.pyc
+.pytest_cache
+api/tests
+deploy
+*.md

@@ -46,6 +46,18 @@ class RecordedDecision:
     evidence: list[QueryEvidence]
 
 
+@dataclass(frozen=True)
+class PreviewedDecision:
+    """A decision reached but deliberately not recorded."""
+
+    decision: Decision
+    facts: Facts
+    evidence: list[QueryEvidence]
+    policy_revision: str
+    policy_sha256: str
+    max_revision: int
+
+
 def _timestamp_id(prefix: str, moment: datetime) -> str:
     return f"{prefix}-{moment.strftime('%Y-%m-%d')}-{uuid4().hex[:4].upper()}"
 
@@ -140,6 +152,48 @@ def _summary(hits: list[str], owned: set[str]) -> str:
     return f"{count} blocking condition" + ("s" if count > 1 else "")
 
 
+def preview_decision(
+    executor: Executor,
+    *,
+    title_id: str,
+    territory_code: str,
+    effective_at: datetime,
+    policy_revision: str = DEFAULT_POLICY_REVISION,
+    max_revision: int | None = None,
+) -> PreviewedDecision:
+    """Reach a decision without recording one.
+
+    This exists for the operator-facing agent. The agent answers questions an
+    operator asks while thinking, and most of those questions should not leave
+    a decision in the ledger — a receipt is a deliberate act, not a side effect
+    of asking.
+
+    It takes no `writer`, which is the whole point. The read-only guarantee is
+    a property of the signature rather than of the implementation, so it cannot
+    be lost by a later edit to the body.
+    """
+    if max_revision is None:
+        max_revision = current_max_revision(executor, title_id)
+    policy, policy_sha256 = read_policy(executor, policy_revision)
+
+    facts, evidence = resolve_facts(executor, title_id, territory_code, max_revision)
+    decision = evaluate(
+        ReleaseRequest(
+            title_id=title_id, territory_code=territory_code, effective_at=effective_at
+        ),
+        facts,
+        policy,
+    )
+    return PreviewedDecision(
+        decision=decision,
+        facts=facts,
+        evidence=evidence,
+        policy_revision=policy_revision,
+        policy_sha256=policy_sha256,
+        max_revision=max_revision,
+    )
+
+
 def make_decision(
     executor: Executor,
     writer: Writer,
@@ -159,20 +213,25 @@ def make_decision(
     in system time. Left unset it means "everything known now", which is the
     ordinary case. Setting it is how a decision taken before a correction is
     recorded — not a test affordance, but the situation the product exists for.
+
+    The evaluation itself is `preview_decision`. Sharing that path is what
+    guarantees the agent's explanation and the recorded receipt can never
+    describe different outcomes for the same evidence.
     """
     now = now or datetime.now(timezone.utc)
-    if max_revision is None:
-        max_revision = current_max_revision(executor, title_id)
-    policy, policy_sha256 = read_policy(executor, policy_revision)
-
-    facts, evidence = resolve_facts(executor, title_id, territory_code, max_revision)
-    decision = evaluate(
-        ReleaseRequest(
-            title_id=title_id, territory_code=territory_code, effective_at=effective_at
-        ),
-        facts,
-        policy,
+    previewed = preview_decision(
+        executor,
+        title_id=title_id,
+        territory_code=territory_code,
+        effective_at=effective_at,
+        policy_revision=policy_revision,
+        max_revision=max_revision,
     )
+    decision = previewed.decision
+    facts = previewed.facts
+    evidence = previewed.evidence
+    max_revision = previewed.max_revision
+    policy_sha256 = previewed.policy_sha256
 
     snapshot = build_snapshot(
         evidence, snapshot_id or _timestamp_id("RS", now), now, max_revision=max_revision

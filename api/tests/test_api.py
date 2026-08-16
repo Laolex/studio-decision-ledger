@@ -107,3 +107,34 @@ def test_comparison_separates_the_record_from_current_state(client):
     assert comparison["historical"]["max_revision"] == created["max_revision"]
     assert "current" in comparison
     assert comparison["record_unchanged"] is True
+
+
+def test_the_evidence_endpoint_answers_without_recording(client, http_executor):
+    """What the operator-facing agent reaches.
+
+    The gate must match what `POST /api/decisions` would record, and the
+    ledger must be untouched — an agent answering a question is not a
+    decision anyone has taken.
+    """
+    before = http_executor("SELECT count() AS n FROM sdl.decision_records")[0]["n"]
+
+    response = client.post(
+        "/api/evidence",
+        json={
+            "title_id": TITLE,
+            "territory_code": TERRITORY,
+            "effective_at": "2026-07-30T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["outcome"] == "HOLD"
+    assert body["rule_hits"] == ["LIC-002"]
+    assert body["blocking_condition"]
+    assert body["recorded"] is False
+    assert "decision_id" not in body
+    assert "snapshot_id" not in body
+
+    after = http_executor("SELECT count() AS n FROM sdl.decision_records")[0]["n"]
+    assert after == before
