@@ -3,14 +3,31 @@ name = "sdl-api"
 version = "0.1.0"
 description = "Studio Decision Ledger — decision service"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi>=0.141",
+    "uvicorn>=0.52",
+    "mcp>=1.29",
+    # The graded retrieval path. Not a convenience: the decision flow has no
+    # direct-driver fallback, so without this server there is no evidence.
+    "mcp-clickhouse>=0.4",
+    "google-genai>=2.17",
+    "google-adk>=2.7",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# Only needed to publish the agent to Vertex AI Agent Engine, not to serve the
+# API. Kept out of the runtime set so the Cloud Run image stays small.
+agent-engine = ["google-cloud-aiplatform[agent_engines]>=1.164"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# The distribution is `sdl-api`; the package is `sdl`. Hatchling cannot infer
+# one from the other, so the container build needs this said out loud.
+[tool.hatch.build.targets.wheel]
+packages = ["sdl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
