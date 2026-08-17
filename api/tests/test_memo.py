@@ -114,3 +114,26 @@ def test_the_memo_module_exposes_no_write_capability():
     assert "import sdl.ledger" not in source
     assert "write_decision" not in source
     assert "writer" not in source
+
+
+def test_the_prompt_forbids_the_model_writing_its_own_subject_line():
+    """The subject is generated; a model-written one is discarded.
+
+    Left unsaid, the model opens with `Subject: ...` and spends its budget
+    on a header nobody reads.
+    """
+    prompt = build_prompt(RECORD, blocking_condition=BLOCKING)
+    assert "subject line" in prompt.lower()
+
+
+def test_a_decision_with_nothing_blocking_is_not_forced_into_an_escalation():
+    """An AVAILABLE decision has no problem to escalate.
+
+    Without this the model invents one, because the prompt asked it to
+    explain a block that does not exist.
+    """
+    clear = DecisionRecord(**{**RECORD.__dict__, "outcome": "AVAILABLE", "rule_hits": []})
+    prompt = build_prompt(clear, blocking_condition="")
+
+    assert "none recorded" in prompt
+    assert "status note" in prompt.lower()
