@@ -185,3 +185,43 @@ CREATE TABLE IF NOT EXISTS sdl.verification_attempts
 )
 ENGINE = MergeTree
 ORDER BY (decision_id, attempted_at);
+
+-- Generation provenance recorded against an asset. `generation_kind` of NONE
+-- is an assertion that the asset is not generated, and is deliberately a row
+-- rather than an absent one: the evaluator distinguishes "recorded as not
+-- generated" from "nothing on file", and only the latter is unknowable.
+CREATE TABLE IF NOT EXISTS sdl.synthetic_content
+(
+    record_id                   String,
+    title_id                    String,
+    asset_ref                   String,                   -- e.g. scene or shot reference
+    generation_kind             LowCardinality(String),   -- SYNTHETIC | ASSISTED | NONE
+    tool_ref                    String,                   -- tool or model that produced it
+    disclosure_obligation_ref   String,                   -- obligation recorded in policy
+    revision                    UInt64,
+    recorded_at                 DateTime64(3, 'UTC'),
+    amendment_note              String DEFAULT ''
+)
+ENGINE = MergeTree
+ORDER BY (title_id, record_id, revision);
+
+-- Performer consent for use of likeness or voice. Not territory-partitioned in
+-- the ORDER BY on purpose: consents are retrieved across territories so the
+-- evaluator can tell a consent that does not cover this request (HOLD) from no
+-- consent at all (ESCALATE).
+CREATE TABLE IF NOT EXISTS sdl.performer_consents
+(
+    consent_id      String,
+    title_id        String,
+    performer_ref   String,
+    consent_scope   LowCardinality(String),           -- likeness | voice | both
+    territory_code  LowCardinality(String),
+    valid_from      DateTime64(3, 'UTC'),
+    valid_to        DateTime64(3, 'UTC'),
+    status          LowCardinality(String),           -- ACTIVE | WITHDRAWN | EXPIRED
+    revision        UInt64,
+    recorded_at     DateTime64(3, 'UTC'),
+    amendment_note  String DEFAULT ''
+)
+ENGINE = MergeTree
+ORDER BY (title_id, consent_id, revision);

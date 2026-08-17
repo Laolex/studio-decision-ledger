@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from sdl.evaluator import evaluate, ReleaseRequest
 from sdl.mcp_executor import ClickHouseMCPExecutor
-from sdl.resolve import resolve_facts
+from sdl.resolve import EVIDENCE_TABLES, resolve_facts
 from sdl.retrieval import point_in_time_query
 
 TITLE = "NORTHSTAR-S01E06"
@@ -74,7 +74,7 @@ def test_full_decision_through_the_mcp_path(clickhouse_env):
 
     assert result.outcome == "HOLD"
     assert result.rule_hits == ["LIC-002"]
-    assert len(evidence) == 5
+    assert len(evidence) == len(EVIDENCE_TABLES)
     assert all(len(item.result_hash) == 64 for item in evidence)
 
 

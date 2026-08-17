@@ -35,6 +35,8 @@ RULE_LANGUAGE = {
     "DLV-001": "final delivery approval is missing or captions are not approved",
     "CNT-001": "a blocking continuity exception is still open",
     "ESC-001": "the facts on file are incomplete or contradictory",
+    "SYN-001": "an asset is recorded as generated and no performer consent is on file",
+    "CON-001": "the performer consent on file does not cover this territory, date or scope",
 }
 
 SYSTEM_FRAMING = """You are assisting a catalogue-operations manager at a streaming service.

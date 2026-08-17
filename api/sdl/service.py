@@ -22,7 +22,9 @@ from sdl.ledger import (
 from sdl.record import DecisionRecord, EvidenceSnapshot, build_snapshot
 from sdl.resolve import Executor, QueryEvidence, resolve_facts
 
-DEFAULT_POLICY_REVISION = "POL-2026.07"
+# POL-2026.08 adds the synthetic-content rules. Decisions already recorded
+# against POL-2026.07 keep their binding and still replay against it.
+DEFAULT_POLICY_REVISION = "POL-2026.08"
 
 # A rule id is an index into a policy document, not an explanation. An operator
 # needs to know what to go and fix.
@@ -34,6 +36,8 @@ RULE_LANGUAGE = {
     "DLV-001": "Final delivery approval is missing or captions are not approved.",
     "CNT-001": "A blocking continuity exception is still open.",
     "ESC-001": "The facts on file are incomplete or contradictory, so no safe determination is possible.",
+    "SYN-001": "An asset is recorded as generated and no performer consent is on file, so no safe determination is possible.",
+    "CON-001": "The performer consent on file does not cover this territory, date or scope.",
 }
 
 
@@ -90,6 +94,23 @@ def evidence_groups(facts: Facts, decision: Decision, policy_revision: str) -> l
             "tone": "clear",
         }
         for clearance in facts.clearances
+    ] + [
+        {
+            "name": f"Provenance {record.asset_ref}",
+            "value": f"{record.generation_kind.title()} · {record.tool_ref}",
+            "tone": "hold" if record.generation_kind in ("SYNTHETIC", "ASSISTED") and "SYN-001" in hits else "clear",
+        }
+        for record in facts.synthetic_content
+    ] + [
+        {
+            "name": f"Consent {consent.performer_ref}",
+            "value": (
+                f"{consent.consent_scope.title()} · {consent.territory_code} · "
+                f"through {consent.valid_to:%d %b %Y} · {consent.status.title()}"
+            ),
+            "tone": "hold" if "CON-001" in hits else "clear",
+        }
+        for consent in facts.performer_consents
     ]
 
     delivery_items = [
@@ -126,8 +147,8 @@ def evidence_groups(facts: Facts, decision: Decision, policy_revision: str) -> l
     return [
         {
             "label": "Rights & clearances",
-            "tone": _tone(hits, {"LIC-001", "LIC-002", "CLR-001"}),
-            "summary": _summary(hits, {"LIC-001", "LIC-002", "CLR-001"}),
+            "tone": _tone(hits, {"LIC-001", "LIC-002", "CLR-001", "SYN-001", "CON-001"}),
+            "summary": _summary(hits, {"LIC-001", "LIC-002", "CLR-001", "SYN-001", "CON-001"}),
             "items": rights_items,
         },
         {

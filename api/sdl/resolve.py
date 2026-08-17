@@ -24,7 +24,9 @@ from sdl.evaluator import (
     Delivery,
     Facts,
     License,
+    PerformerConsent,
     Rating,
+    SyntheticContent,
 )
 from sdl.retrieval import TABLE_KEYS, point_in_time_query
 
@@ -36,6 +38,8 @@ EVIDENCE_TABLES = (
     "ratings",
     "deliveries",
     "continuity_exceptions",
+    "synthetic_content",
+    "performer_consents",
 )
 
 
@@ -151,6 +155,28 @@ def resolve_facts(
                 state=row["state"],
             )
             for row in rows_by_table["continuity_exceptions"]
+        ],
+        synthetic_content=[
+            SyntheticContent(
+                record_id=row["record_id"],
+                asset_ref=row["asset_ref"],
+                generation_kind=row["generation_kind"],
+                tool_ref=row["tool_ref"],
+                disclosure_obligation_ref=row["disclosure_obligation_ref"],
+            )
+            for row in rows_by_table["synthetic_content"]
+        ],
+        performer_consents=[
+            PerformerConsent(
+                consent_id=row["consent_id"],
+                performer_ref=row["performer_ref"],
+                consent_scope=row["consent_scope"],
+                territory_code=row["territory_code"],
+                valid_from=_require_timestamp(row["valid_from"]),
+                valid_to=_require_timestamp(row["valid_to"]),
+                status=row["status"],
+            )
+            for row in rows_by_table["performer_consents"]
         ],
     )
 

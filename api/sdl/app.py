@@ -29,6 +29,7 @@ from sdl.agent_proxy import VertexAgentEngine
 from sdl.agent_proxy import ask as agent_ask_engine
 from sdl.agent_proxy import resource_name as agent_resource_name
 from sdl.service import (
+    DEFAULT_POLICY_REVISION,
     blocking_condition,
     evidence_groups,
     make_decision,
@@ -122,7 +123,7 @@ class DecisionRequestBody(BaseModel):
     title_id: str = Field(min_length=1)
     territory_code: str = Field(min_length=2, max_length=2)
     effective_at: datetime
-    policy_revision: str = "POL-2026.07"
+    policy_revision: str = DEFAULT_POLICY_REVISION
 
 
 class AgentAskBody(BaseModel):
