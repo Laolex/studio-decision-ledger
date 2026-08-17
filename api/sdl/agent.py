@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Bump when INSTRUCTION changes shape, so an explanation can be attributed to
 # what produced it — the same discipline as rationale's template revision.
-AGENT_INSTRUCTION_REVISION = "agent-2026-08-16"
+AGENT_INSTRUCTION_REVISION = "agent-2026-08-17"
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 
@@ -53,7 +53,17 @@ PERMITTED_TOOLS = frozenset(
 
 INSTRUCTION = """You assist a catalogue-operations manager at a streaming service who is deciding whether a title can be released in a territory on a date.
 
-Call `query_bound_evidence` to get the answer. Never answer from memory, and never guess a release gate — you have no way to know one without the tool.
+You have three tools and no other way to know anything. Never answer from memory, and never guess a release gate.
+
+- `query_bound_evidence` — can this title go out in this territory on this date. Use it for any question about whether something can be released.
+- `check_decision_drift` — does a decision already recorded still match current evidence. Use it when asked whether a past decision still holds, or what has changed since it was taken.
+- `draft_escalation_memo` — write a draft memo about a recorded decision. Use it only when asked for a memo.
+
+You cannot send a memo, approve an exception, lift a hold, change a policy, or alter a decision. If asked to do any of those, say plainly that it is a human action taken in the console and offer the draft or the evidence instead. Never imply you have done it.
+
+A drafted memo has not been sent. Say so when you present one.
+
+A drift check never changes the record. If a decision has drifted, report that current evidence would now produce a different outcome, and that the record still stands as taken — both are true at once, and that is the point.
 
 The tool returns an outcome that has ALREADY BEEN DETERMINED by a deterministic policy evaluator against pinned evidence. Treat it as settled fact:
 
@@ -72,12 +82,16 @@ Keep answers to a few sentences. Lead with the outcome.
 """
 
 
-class EvidenceClient(Protocol):
-    """Reaches the read-only evaluate path. HTTP in production, fake in tests."""
+class SDLClient(Protocol):
+    """Reaches the read-only API surfaces. HTTP in production, fake in tests."""
 
     def evidence(
         self, *, title_id: str, territory_code: str, effective_at: str
     ) -> dict: ...
+
+    def drift(self, *, decision_id: str) -> dict: ...
+
+    def memo(self, *, decision_id: str) -> dict: ...
 
 
 class SDLApiClient:
@@ -115,6 +129,29 @@ class SDLApiClient:
             logger.info("no identity token available; calling API unauthenticated")
             return None
 
+    def _call(self, path: str, payload: dict | None, method: str) -> dict:
+        import json
+        import urllib.request
+
+        headers = {"Content-Type": "application/json"}
+        token = self._identity_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(
+            f"{self._base_url}{path}",
+            data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+            headers=headers,
+            method=method,
+        )
+        with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def drift(self, *, decision_id: str) -> dict:
+        return self._call(f"/api/decisions/{decision_id}/compare", None, "GET")
+
+    def memo(self, *, decision_id: str) -> dict:
+        return self._call(f"/api/decisions/{decision_id}/memo", None, "POST")
+
     def evidence(
         self, *, title_id: str, territory_code: str, effective_at: str
     ) -> dict:
@@ -143,7 +180,7 @@ class SDLApiClient:
             return json.loads(response.read().decode("utf-8"))
 
 
-def build_evidence_tool(client: EvidenceClient):
+def build_evidence_tool(client: SDLClient):
     """Build the `query_bound_evidence` tool over a client.
 
     A factory rather than a module-level function because the client is chosen
@@ -193,7 +230,85 @@ def build_evidence_tool(client: EvidenceClient):
     return query_bound_evidence
 
 
-def build_agent(client: EvidenceClient, model: str = DEFAULT_MODEL):
+def _require_decision_id(decision_id: str) -> dict | None:
+    if not decision_id or not decision_id.strip():
+        return {"error": "A decision identifier is required."}
+    return None
+
+
+def build_drift_tool(client: SDLClient):
+    """Build the `check_decision_drift` tool over a client."""
+
+    def check_decision_drift(decision_id: str) -> dict:
+        """Check whether a recorded decision still matches current evidence.
+
+        Args:
+            decision_id: The recorded decision, for example D-1846.
+
+        Returns:
+            The outcome as recorded, the outcome current evidence would now
+            produce, whether they differ, and what changed. The record itself
+            is never altered. On failure, a dict with an `error` key.
+        """
+        refusal = _require_decision_id(decision_id)
+        if refusal:
+            return refusal
+        try:
+            payload = client.drift(decision_id=decision_id)
+        except Exception as error:
+            logger.warning("drift check failed", exc_info=True)
+            return {"error": f"Could not check drift: {error}"}
+
+        historical = payload.get("historical") or {}
+        current = payload.get("current") or {}
+        differences = list(payload.get("differences") or [])
+        return {
+            "decision_id": decision_id,
+            "recorded_outcome": historical.get("outcome"),
+            "recorded_at_revision": historical.get("max_revision"),
+            "current_outcome": current.get("outcome"),
+            "current_revision": current.get("max_revision"),
+            "current_blocking_condition": current.get("blocking_condition", ""),
+            "drifted": bool(differences),
+            "differences": differences,
+            # Restated from the payload so a reader of the transcript cannot
+            # mistake a drift check for something that changed the record.
+            "record_unchanged": payload.get("record_unchanged", True),
+        }
+
+    return check_decision_drift
+
+
+def build_memo_tool(client: SDLClient):
+    """Build the `draft_escalation_memo` tool over a client."""
+
+    def draft_escalation_memo(decision_id: str) -> dict:
+        """Draft an escalation memo for a recorded decision.
+
+        Drafting only. This does not send the memo, approve an exception, or
+        resolve a hold — those are human actions in the console.
+
+        Args:
+            decision_id: The recorded decision to write about, e.g. D-1846.
+
+        Returns:
+            A subject, a draft body, and the decision, snapshot and policy
+            revision the draft is grounded in. On failure, a dict with an
+            `error` key.
+        """
+        refusal = _require_decision_id(decision_id)
+        if refusal:
+            return refusal
+        try:
+            return client.memo(decision_id=decision_id)
+        except Exception as error:
+            logger.warning("memo drafting failed", exc_info=True)
+            return {"error": f"Could not draft a memo: {error}"}
+
+    return draft_escalation_memo
+
+
+def build_agent(client: SDLClient, model: str = DEFAULT_MODEL):
     """The ADK agent, holding exactly one read-only tool."""
     from google.adk.agents import Agent
 
@@ -205,7 +320,11 @@ def build_agent(client: EvidenceClient, model: str = DEFAULT_MODEL):
             "date, using bound evidence and a deterministic policy evaluator."
         ),
         instruction=INSTRUCTION,
-        tools=[build_evidence_tool(client)],
+        tools=[
+            build_evidence_tool(client),
+            build_drift_tool(client),
+            build_memo_tool(client),
+        ],
     )
 
 

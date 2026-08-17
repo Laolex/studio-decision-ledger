@@ -159,3 +159,22 @@ export function askAgent(question: string, sessionId?: string): Promise<AgentAns
     body: JSON.stringify({ question, session_id: sessionId ?? null }),
   });
 }
+
+export interface MemoPayload {
+  subject: string;
+  body: string;
+  blocking_condition: string;
+  grounded_in: {
+    decision_id: string;
+    snapshot_id: string;
+    policy_revision: string;
+  };
+  template_revision: string;
+  sent: boolean;
+}
+
+export function draftMemo(decisionId: string): Promise<MemoPayload> {
+  return request<MemoPayload>(`/api/decisions/${decisionId}/memo`, {
+    method: "POST",
+  });
+}

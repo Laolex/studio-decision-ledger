@@ -26,6 +26,8 @@ from sdl.ledger import read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPExecutor
 from sdl.resolve import resolve_facts
 from sdl.agent_proxy import VertexAgentEngine
+from sdl.gemini import GeminiRationaleModel, vertex_client
+from sdl.memo import draft_memo
 from sdl.agent_proxy import ask as agent_ask_engine
 from sdl.agent_proxy import resource_name as agent_resource_name
 from sdl.service import (
@@ -319,6 +321,31 @@ def create_app() -> FastAPI:
                 "record to stop being evidence of anything."
             ),
         }
+
+    @app.post("/api/decisions/{decision_id}/memo")
+    def draft_memo_for(decision_id: str, executor=Depends(get_executor)) -> dict:
+        """Draft an escalation memo for a recorded decision.
+
+        Drafting only. Nothing is written and nothing is sent — this takes no
+        writer, and sending stays a human action in the console.
+        """
+        record = read_decision(executor, decision_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"no decision {decision_id}")
+
+        decision = Decision(outcome=record.outcome, rule_hits=list(record.rule_hits))
+        try:
+            model = GeminiRationaleModel(vertex_client())
+            return draft_memo(
+                model, record, blocking_condition=blocking_condition(decision)
+            )
+        except Exception as error:
+            # A memo with no body is nothing, so this is reported rather than
+            # returned empty — the opposite of the rationale path, where a
+            # decision without an explanation is still a valid decision.
+            raise HTTPException(
+                status_code=502, detail=f"The memo could not be drafted: {error}"
+            ) from error
 
     @app.get("/api/decisions/{decision_id}/compare")
     def compare_decision(decision_id: str, executor=Depends(get_executor)) -> dict:
