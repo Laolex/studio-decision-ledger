@@ -56,6 +56,41 @@ binding is gone, and that alone is enough for the record to stop being evidence
 of anything. The endpoint is read-only: an ablation that mutated a record to
 make its point would be the exact failure it exists to warn about.
 
+### The negative control, and the result that does not flatter us
+
+The ablation covers one arm. The negative control runs the whole matrix through
+the same production `verify()`, offline, with no credentials and no network — so
+you can run it from a clean clone before you trust anything else here:
+
+```
+python3 scripts/negative_control.py
+```
+
+```
+  ok    Intact record              →  C3_BOUNDARY
+  ok    Model rationale removed    →  C2
+  ok    Snapshot binding removed   →  NOT_CERTIFIED
+  ok    Result hash mutated        →  NOT_CERTIFIED
+  ok    Original record unchanged  →  PASS
+```
+
+It exits non-zero if any expectation fails. Every mutation is an in-memory copy;
+the canonical form of the record is captured before the first arm and compared
+after the last, so "the record was not touched" is measured, not asserted.
+
+**Removing Gemini's prose changes nothing about verdict reproducibility.** Both
+certified arms reproduce the recorded outcome from pinned evidence — the
+verifier refuses to certify at all when it cannot. Gemini operates the
+workflow; deterministic evidence and policy determine the gate.
+
+That is worth stating plainly because it cuts against the obvious pitch. The
+model is load-bearing for the *operator* — it is how a person asks a question,
+gets a drift handoff, and receives a drafted memo — and deliberately not
+load-bearing for *truth*. Rows one and two are the proof: stripping the model's
+words moves the class from `C3_BOUNDARY` to `C2`, which is not a downgrade but
+the removal of a boundary statement that only existed because model text was
+present. The reproduced outcome is identical either way.
+
 ### Capability classes
 
 | Class | Meaning |
