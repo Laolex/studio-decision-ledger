@@ -52,3 +52,9 @@ button, a { font: inherit; }
 .agent-form input { flex: 1 1 auto; min-width: 0; border: 1px solid #cdd6da; background: #f9fbfb; padding: 0 11px; height: 34px; color: #26343d; font-size: 13px; }
 .agent-form input:focus { outline: 2px solid #176a54; outline-offset: -2px; }
 @media (max-width: 1279px) { .shell.with-agent { grid-template-columns: 246px minmax(0, 1fr); } .agent-panel { position: static; height: auto; max-height: 520px; grid-column: 1 / -1; border-left: 0; border-top: 1px solid #d6dfe2; } }
+.agent-detail { padding: 11px 13px; background: #f6f8f9; border-left: 2px solid #8ca0ae; }
+.agent-detail > span { display: block; color: #6b7a83; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.agent-detail dl { margin: 8px 0 0; display: grid; gap: 4px; }
+.agent-detail dl > div { display: flex; gap: 8px; justify-content: space-between; }
+.agent-detail dt { color: #6a7982; font-size: 11px; text-transform: capitalize; }
+.agent-detail dd { margin: 0; color: #2d404a; font-size: 11px; font-weight: 600; text-align: right; word-break: break-word; }

@@ -66,18 +66,30 @@ class VertexAgentEngine:
 def _tool_result(name: str, response: dict) -> dict:
     """Flatten a tool response into what the console shows.
 
-    An error and an outcome are mutually exclusive by construction: the tool
-    returns one or the other, never both. Reporting `outcome: None` alongside
-    the error keeps the console from having to branch on key presence.
+    Only `query_bound_evidence` produces a release gate. Drift checks and memo
+    drafts return neither an outcome nor rule hits, and flattening them into
+    the gate shape rendered an empty verdict in the console — a decision that
+    was never made, displayed as though it had been. So `outcome` is present
+    only when the tool actually determined one, and everything else travels as
+    scalar `detail` the console lists plainly.
     """
     error = response.get("error")
+    outcome = None if error else response.get("outcome")
+    detail = {
+        key: value
+        for key, value in response.items()
+        if key not in ("error", "outcome", "rule_hits", "evidence_groups")
+        and isinstance(value, (str, bool, int, float))
+        and value != ""
+    }
     return {
         "kind": "tool_result",
         "name": name,
-        "outcome": None if error else response.get("outcome"),
+        "outcome": outcome,
         "rule_hits": list(response.get("rule_hits") or []),
         "blocking_condition": response.get("blocking_condition", ""),
         "policy_revision": response.get("policy_revision", ""),
+        "detail": detail,
         "error": error,
     }
 
