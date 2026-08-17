@@ -17,7 +17,7 @@ import {
 } from "@carbon/icons-react";
 import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 
-import AgentPanel, { type AgentPlacement } from "./AgentPanel";
+import AgentPanel from "./AgentPanel";
 import {
   ablateDecision,
   compareDecision,
@@ -84,16 +84,6 @@ export default function App() {
   const [comparison, setComparison] = useState<ComparisonPayload | null>(null);
 
   const [showMemo, setShowMemo] = useState(false);
-
-  // Which placement to show. Kept in localStorage so flipping between them
-  // while reviewing survives a reload.
-  const [placement, setPlacementState] = useState<AgentPlacement>(
-    () => (localStorage.getItem("sdl.agentPlacement") as AgentPlacement) || "docked",
-  );
-  const setPlacement = useCallback((next: AgentPlacement) => {
-    localStorage.setItem("sdl.agentPlacement", next);
-    setPlacementState(next);
-  }, []);
 
   const [showAblation, setShowAblation] = useState(false);
   const [ablation, setAblation] = useState<AblationPayload | null>(null);
@@ -187,7 +177,7 @@ export default function App() {
   const drifted = (comparison?.differences.length ?? 0) > 0;
 
   return (
-    <main className={`shell${placement === "docked" ? " with-agent" : ""}`}>
+    <main className="shell with-agent">
       <aside className="sidebar" aria-label="Primary navigation">
         <a className="brand" href="#top" aria-label="Studio Decision Ledger home">
           <span className="brand-mark"><span /></span>
@@ -215,20 +205,6 @@ export default function App() {
         <header className="topbar">
           <div className="crumbs"><span>North Star</span><ArrowRight size={14} /><span>Release readiness</span></div>
           <div className="topbar-actions">
-            {/* Review affordance: both placements are built so one can be
-                chosen by eye. The unchosen one comes out before submission. */}
-            <div className="placement-toggle" role="group" aria-label="Agent panel placement">
-              {(["docked", "inline"] as AgentPlacement[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={placement === option ? "active" : ""}
-                  onClick={() => setPlacement(option)}
-                >
-                  {option === "docked" ? "Docked" : "Inline"}
-                </button>
-              ))}
-            </div>
             <button className="icon-button" aria-label="Search decisions"><Search size={18} /></button>
             <button className="avatar-button" aria-label="Account menu">LO</button>
           </div>
@@ -273,8 +249,6 @@ export default function App() {
             </div>
           </div>
         </section>
-
-        {placement === "inline" && <AgentPanel placement="inline" />}
 
         <section className="drift-section" id="queue" aria-labelledby="drift-title">
           <div className="drift-intro">
@@ -415,7 +389,7 @@ export default function App() {
         </section>
       </section>
 
-      {placement === "docked" && <AgentPanel placement="docked" />}
+      <AgentPanel />
 
       <Modal
         open={showReplay}
