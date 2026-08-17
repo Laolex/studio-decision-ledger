@@ -55,6 +55,25 @@ function ToolResult({
       </div>
     );
   }
+  // Only the evidence tool determines an outcome. A drift check or a memo
+  // draft has no gate, and showing an empty one would present a decision
+  // nobody made.
+  if (!event.outcome) {
+    return (
+      <div className="agent-detail">
+        <span>{event.name.replace(/_/g, " ")}</span>
+        <dl>
+          {Object.entries(event.detail).map(([key, value]) => (
+            <div key={key}>
+              <dt>{key.replace(/_/g, " ")}</dt>
+              <dd>{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    );
+  }
+
   return (
     <div className={`agent-gate ${event.outcome === "AVAILABLE" ? "clear" : "hold"}`}>
       <div>

@@ -219,3 +219,48 @@ def test_an_unreachable_agent_is_not_reported_as_a_decision_failure():
     response = client.post("/api/agent/ask", json={"question": "Can it ship?"})
     assert response.status_code == 502
     assert "could not be reached" in response.json()["detail"]
+
+
+def test_a_drift_result_is_not_rendered_as_an_empty_gate():
+    """Only query_bound_evidence determines an outcome.
+
+    Flattening a drift check into the gate shape showed a verdict with a
+    null outcome — a decision that was never made, displayed as if it had
+    been.
+    """
+    raw = [
+        {
+            "content": {
+                "parts": [
+                    {
+                        "function_response": {
+                            "name": "check_decision_drift",
+                            "response": {
+                                "decision_id": "D-1846",
+                                "recorded_outcome": "AVAILABLE",
+                                "current_outcome": "HOLD",
+                                "drifted": True,
+                                "record_unchanged": True,
+                                "differences": ["Current data would produce HOLD."],
+                            },
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+    result = normalise_events(raw)[0]
+
+    assert result["outcome"] is None
+    assert result["detail"]["recorded_outcome"] == "AVAILABLE"
+    assert result["detail"]["current_outcome"] == "HOLD"
+    assert result["detail"]["drifted"] is True
+    # The list of differences is not a scalar and does not belong in detail.
+    assert "differences" not in result["detail"]
+
+
+def test_the_evidence_gate_still_carries_its_outcome():
+    result = next(
+        e for e in normalise_events(RAW_EVENTS) if e["kind"] == "tool_result"
+    )
+    assert result["outcome"] == "HOLD"

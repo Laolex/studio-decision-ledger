@@ -138,6 +138,7 @@ export interface AgentToolResult {
   rule_hits: string[];
   blocking_condition: string;
   policy_revision: string;
+  detail: Record<string, string | number | boolean>;
   error: string | null;
 }
 
