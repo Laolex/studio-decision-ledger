@@ -1,0 +1,70 @@
+{
+  "_note": "An observed production run. Distinct from scripts/negative_control.py, which is an offline control against a synthetic fixture. Everything below came back from the deployed service; nothing is hand-written.",
+  "capture": {
+    "captured_at": "2026-08-17T13:28:15Z",
+    "cloud_run_revision": "sdl-00010-vnk",
+    "endpoint": "POST https://sdl-ntvbh3dlvq-uc.a.run.app/api/agent/ask",
+    "agent_runtime": "Vertex AI Agent Engine (native Google ADK)",
+    "agent_engine_resource": "projects/597227190850/locations/us-central1/reasoningEngines/8991042481126637568",
+    "agent_instruction_revision": "agent-2026-08-17b",
+    "model": "gemini-2.5-flash",
+    "session_id": "omitted — a session identifier is not evidence and is not published",
+    "reproduce": "curl -s -X POST https://sdl-ntvbh3dlvq-uc.a.run.app/api/agent/ask -H 'Content-Type: application/json' -d '{\"question\": \"What changed after D-1846, is the release now at risk, and prepare the reviewer handoff.\"}'"
+  },
+  "operator_request": "What changed after D-1846, is the release now at risk, and prepare the reviewer handoff.",
+  "events": [
+    {
+      "kind": "tool_call",
+      "name": "check_decision_drift",
+      "args": {
+        "decision_id": "D-1846"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "name": "check_decision_drift",
+      "outcome": null,
+      "rule_hits": [],
+      "blocking_condition": "",
+      "policy_revision": "",
+      "detail": {
+        "decision_id": "D-1846",
+        "recorded_outcome": "AVAILABLE",
+        "recorded_at_revision": 1,
+        "current_outcome": "HOLD",
+        "current_revision": 3,
+        "current_blocking_condition": "The territory grant does not cover this release path.",
+        "drifted": true,
+        "record_unchanged": true
+      },
+      "error": null
+    },
+    {
+      "kind": "tool_call",
+      "name": "draft_escalation_memo",
+      "args": {
+        "decision_id": "D-1846"
+      }
+    },
+    {
+      "kind": "tool_result",
+      "name": "draft_escalation_memo",
+      "outcome": null,
+      "rule_hits": [],
+      "blocking_condition": "",
+      "policy_revision": "",
+      "detail": {
+        "subject": "NORTHSTAR-S01E06 — recorded AVAILABLE, current evidence would produce HOLD, for NG on 30 July 2026",
+        "drifted": true,
+        "body": "Decision D-1846, recorded at evidence revision 1, indicates that NORTHSTAR-S01E06 is AVAILABLE for release in NG on 30 July 2026. However, current evidence at revision 3 would now produce a HOLD status for the same release, due to the territory grant not covering this release path. The historical record of the decision remains unchanged, but the current data would result in a different outcome. Please review the current position before release.",
+        "template_revision": "memo-2026-08-17c",
+        "sent": false
+      },
+      "error": null
+    },
+    {
+      "kind": "text",
+      "text": "Decision D-1846, which recorded the release as AVAILABLE, has drifted. Current evidence (revision 3, compared to revision 1 when the decision was recorded) would now result in a HOLD because the territory grant does not cover this release path. Therefore, the release is at risk.\n\nHere is a draft escalation memo for reviewer handoff. Please note this memo has not been sent:\n\nSubject: NORTHSTAR-S01E06 — recorded AVAILABLE, current evidence would produce HOLD, for NG on 30 July 2026\n\nDecision D-1846, recorded at evidence revision 1, indicates that NORTHSTAR-S01E06 is AVAILABLE for release in NG on 30 July 2026. However, current evidence at revision 3 would now produce a HOLD status for the same release, due to the territory grant not covering this release path. The historical record of the decision remains unchanged, but the current data would result in a different outcome. Please review the current position before release."
+    }
+  ]
+}

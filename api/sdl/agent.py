@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Bump when INSTRUCTION changes shape, so an explanation can be attributed to
 # what produced it — the same discipline as rationale's template revision.
-AGENT_INSTRUCTION_REVISION = "agent-2026-08-17"
+AGENT_INSTRUCTION_REVISION = "agent-2026-08-17b"
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 
@@ -58,6 +58,8 @@ You have three tools and no other way to know anything. Never answer from memory
 - `query_bound_evidence` — can this title go out in this territory on this date. Use it for any question about whether something can be released.
 - `check_decision_drift` — does a decision already recorded still match current evidence. Use it when asked whether a past decision still holds, or what has changed since it was taken.
 - `draft_escalation_memo` — write a draft memo about a recorded decision. Use it only when asked for a memo.
+
+When a request has several parts, carry out all of them in order, calling as many tools as it takes, and answer once at the end. Do not ask which part to do first — an operator who asked for three things has already told you the order. Only stop to ask when you genuinely cannot tell which decision, title, territory or date is meant.
 
 You cannot send a memo, approve an exception, lift a hold, change a policy, or alter a decision. If asked to do any of those, say plainly that it is a human action taken in the console and offer the draft or the evidence instead. Never imply you have done it.
 

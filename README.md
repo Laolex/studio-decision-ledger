@@ -56,6 +56,50 @@ binding is gone, and that alone is enough for the record to stop being evidence
 of anything. The endpoint is read-only: an ablation that mutated a record to
 make its point would be the exact failure it exists to warn about.
 
+### An observed production run
+
+One operator sentence, two tools, one handoff. Captured from the deployed
+service on **2026-08-17**, Cloud Run revision **`sdl-00010-vnk`**, agent running
+natively on Vertex AI Agent Engine. The full machine-readable capture is at
+[`examples/production-transcript.json`](examples/production-transcript.json);
+the decisive lines are below.
+
+> **Operator:** What changed after D-1846, is the release now at risk, and
+> prepare the reviewer handoff.
+
+```
+CALL    check_decision_drift    {"decision_id": "D-1846"}
+RESULT  recorded_outcome: AVAILABLE   current_outcome: HOLD
+        drifted: true                 record_unchanged: true
+
+CALL    draft_escalation_memo   {"decision_id": "D-1846"}
+RESULT  subject: NORTHSTAR-S01E06 — recorded AVAILABLE, current evidence
+                 would produce HOLD, for NG on 30 July 2026
+        drifted: true                 sent: false
+```
+
+> **Agent:** Decision D-1846, which recorded the release as AVAILABLE, has
+> drifted. Current evidence (revision 3, compared to revision 1 when the
+> decision was recorded) would now result in a HOLD because the territory grant
+> does not cover this release path. Therefore, the release is at risk. Here is a
+> draft escalation memo for reviewer handoff. Please note this memo has not been
+> sent.
+
+Reproduce it against the live service:
+
+```
+curl -s -X POST https://sdl-ntvbh3dlvq-uc.a.run.app/api/agent/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "What changed after D-1846, is the release now at risk, and prepare the reviewer handoff."}'
+```
+
+Two flags in that transcript carry the whole design. `record_unchanged: true` —
+the drift was discovered without touching the record, and could not have been
+otherwise, because nothing the agent can reach takes a writer. `sent: false` —
+the memo is a draft; sending it, approving an exception and lifting a hold
+remain human actions in the console. The historical `AVAILABLE` and the current
+`HOLD` are both true at once, and neither is allowed to overwrite the other.
+
 ### The negative control, and the result that does not flatter us
 
 The ablation covers one arm. The negative control runs the whole matrix through
