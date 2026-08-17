@@ -9,6 +9,7 @@ evidence hashes.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.request
 from base64 import b64encode
@@ -39,6 +40,8 @@ from sdl.service import (
     preview_decision,
 )
 from sdl.verifier import verify
+
+logger = logging.getLogger(__name__)
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
@@ -112,6 +115,23 @@ def get_agent_client():
     return VertexAgentEngine(resource)
 
 
+def get_rationale_model():
+    """The rationale model, or None when Vertex is not configured here.
+
+    Constructed defensively on purpose. A decision must be recordable whether
+    or not the model is reachable — the outcome is determined before the model
+    is asked, so an unavailable model costs an explanation and nothing else.
+    Raising here would make a missing environment variable look like a failure
+    to decide.
+    """
+    try:
+        return GeminiRationaleModel(vertex_client())
+    except Exception:
+        logger.warning("rationale model unavailable; decisions will record without one",
+                       exc_info=True)
+        return None
+
+
 def get_writer():
     """Writes never travel over MCP — SPEC invariant 13."""
     env = load_env()
@@ -173,6 +193,7 @@ def create_app() -> FastAPI:
         body: DecisionRequestBody,
         executor=Depends(get_executor),
         writer=Depends(get_writer),
+        model=Depends(get_rationale_model),
     ) -> dict:
         effective_at = body.effective_at
         if effective_at.tzinfo is None:
@@ -184,6 +205,7 @@ def create_app() -> FastAPI:
             territory_code=body.territory_code,
             effective_at=effective_at,
             policy_revision=body.policy_revision,
+            model=model,
         )
         return _decision_payload(
             recorded.record, recorded.snapshot, recorded.decision, recorded.facts
