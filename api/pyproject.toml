@@ -12,13 +12,13 @@ dependencies = [
     "mcp-clickhouse>=0.4",
     "google-genai>=2.17",
     "google-adk>=2.7",
+    # Runtime, not just deploy: the API proxies the console's questions to the
+    # deployed agent through `vertexai.agent_engines`.
+    "google-cloud-aiplatform[agent_engines]>=1.164",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-# Only needed to publish the agent to Vertex AI Agent Engine, not to serve the
-# API. Kept out of the runtime set so the Cloud Run image stays small.
-agent-engine = ["google-cloud-aiplatform[agent_engines]>=1.164"]
 
 [build-system]
 requires = ["hatchling"]

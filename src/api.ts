@@ -120,3 +120,42 @@ export function formatDate(iso: string): string {
     year: "numeric",
   });
 }
+
+// The agent transcript. The tool call and the gate it returned are carried
+// alongside the model's text so the console can show that the determination
+// came from the evaluator, not from the model.
+
+export interface AgentToolCall {
+  kind: "tool_call";
+  name: string;
+  args: Record<string, string>;
+}
+
+export interface AgentToolResult {
+  kind: "tool_result";
+  name: string;
+  outcome: "AVAILABLE" | "HOLD" | "ESCALATE" | null;
+  rule_hits: string[];
+  blocking_condition: string;
+  policy_revision: string;
+  error: string | null;
+}
+
+export interface AgentText {
+  kind: "text";
+  text: string;
+}
+
+export type AgentEvent = AgentToolCall | AgentToolResult | AgentText;
+
+export interface AgentAnswer {
+  session_id: string;
+  events: AgentEvent[];
+}
+
+export function askAgent(question: string, sessionId?: string): Promise<AgentAnswer> {
+  return request<AgentAnswer>("/api/agent/ask", {
+    method: "POST",
+    body: JSON.stringify({ question, session_id: sessionId ?? null }),
+  });
+}

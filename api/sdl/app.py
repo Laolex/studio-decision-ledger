@@ -25,6 +25,9 @@ from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPExecutor
 from sdl.resolve import resolve_facts
+from sdl.agent_proxy import VertexAgentEngine
+from sdl.agent_proxy import ask as agent_ask_engine
+from sdl.agent_proxy import resource_name as agent_resource_name
 from sdl.service import (
     blocking_condition,
     evidence_groups,
@@ -85,6 +88,26 @@ def get_executor():
     return _mcp_call
 
 
+def get_agent_client():
+    """The deployed agent, or a clear 503 when the console is running unwired.
+
+    Local development and the test suite run without an Agent Engine
+    deployment. Failing here with an explicit message beats letting the
+    console show a generic error for a surface that was simply never
+    configured.
+    """
+    resource = agent_resource_name()
+    if not resource:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AGENT_ENGINE_RESOURCE is not set, so no agent is deployed for "
+                "this environment."
+            ),
+        )
+    return VertexAgentEngine(resource)
+
+
 def get_writer():
     """Writes never travel over MCP — SPEC invariant 13."""
     env = load_env()
@@ -100,6 +123,12 @@ class DecisionRequestBody(BaseModel):
     territory_code: str = Field(min_length=2, max_length=2)
     effective_at: datetime
     policy_revision: str = "POL-2026.07"
+
+
+class AgentAskBody(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    # Threaded back by the console so a follow-up reaches the same session.
+    session_id: str | None = None
 
 
 def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
@@ -155,6 +184,27 @@ def create_app() -> FastAPI:
         return _decision_payload(
             recorded.record, recorded.snapshot, recorded.decision, recorded.facts
         )
+
+    @app.post("/api/agent/ask")
+    def agent_ask(body: AgentAskBody, client=Depends(get_agent_client)) -> dict:
+        """Put a question to the agent deployed on Vertex AI Agent Engine.
+
+        Returns the transcript, not just the answer: the tool call and the gate
+        it returned travel with the model's text so the console can show where
+        the determination came from.
+        """
+        try:
+            return agent_ask_engine(
+                client, body.question, session_id=body.session_id
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except Exception as error:
+            # The agent is an assistive surface. A failure here must not read
+            # like a decision failure, so it is reported as its own thing.
+            raise HTTPException(
+                status_code=502, detail=f"The agent could not be reached: {error}"
+            ) from error
 
     @app.post("/api/evidence")
     def preview_evidence(
