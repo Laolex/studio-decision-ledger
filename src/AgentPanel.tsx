@@ -7,15 +7,14 @@
 // read-only design exists to prevent — so the gate is labelled as the
 // evaluator's and the paragraph is labelled as an explanation.
 //
-// One component serves both placements; only the wrapper class differs.
+// The panel is docked to the right of the shell so it stays reachable from
+// every part of the page rather than only where it happens to sit.
 
 import { useState } from "react";
 import { ArrowRight, Chat, DataBase, WarningFilled } from "@carbon/icons-react";
 import { Button, InlineLoading } from "@carbon/react";
 
 import { askAgent, type AgentEvent } from "./api";
-
-export type AgentPlacement = "docked" | "inline";
 
 interface Turn {
   question: string;
@@ -70,7 +69,7 @@ function ToolResult({
   );
 }
 
-export default function AgentPanel({ placement }: { placement: AgentPlacement }) {
+export default function AgentPanel() {
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
@@ -95,7 +94,7 @@ export default function AgentPanel({ placement }: { placement: AgentPlacement })
   }
 
   return (
-    <section className={`agent-panel ${placement}`} aria-label="Ask the agent">
+    <section className="agent-panel" aria-label="Ask the agent">
       <header className="agent-head">
         <Chat size={16} />
         <div>
