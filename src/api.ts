@@ -179,3 +179,15 @@ export function draftMemo(decisionId: string): Promise<MemoPayload> {
     method: "POST",
   });
 }
+
+// Clipboard access is unavailable on insecure origins and when permission is
+// refused, so this reports whether it worked rather than assuming. A button
+// that says "Copied" when nothing was copied is worse than one that does not.
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}

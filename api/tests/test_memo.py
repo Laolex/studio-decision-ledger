@@ -137,3 +137,52 @@ def test_a_decision_with_nothing_blocking_is_not_forced_into_an_escalation():
 
     assert "none recorded" in prompt
     assert "status note" in prompt.lower()
+
+
+DRIFT = {
+    "historical": {"outcome": "AVAILABLE", "max_revision": 1},
+    "current": {
+        "outcome": "HOLD",
+        "max_revision": 3,
+        "blocking_condition": "The territory grant does not cover this release path.",
+    },
+    "differences": ["Current data would produce HOLD for the same date."],
+    "record_unchanged": True,
+}
+
+
+def test_a_drifted_memo_binds_both_truths():
+    """The reviewer needs what was true then and what is true now.
+
+    A memo describing only the historical position tells them what was true
+    in July, which is the handoff failing at the moment it matters.
+    """
+    prompt = build_prompt(RECORD, blocking_condition=BLOCKING, drift=DRIFT)
+
+    assert "Drift since this decision was recorded" in prompt
+    assert "Recorded: AVAILABLE at evidence revision 1" in prompt
+    assert "would produce: HOLD at revision 3" in prompt
+    assert "unchanged and remains as taken" in prompt
+
+
+def test_the_drifted_subject_names_both_outcomes():
+    memo = draft_memo(FakeModel(), RECORD, blocking_condition=BLOCKING, drift=DRIFT)
+
+    assert memo["drifted"] is True
+    assert "recorded HOLD" in memo["subject"]
+    assert "would produce HOLD" in memo["subject"]
+
+
+def test_an_undrifted_record_gets_no_drift_section():
+    """No empty section for the model to narrate into significance."""
+    steady = {**DRIFT, "differences": []}
+    prompt = build_prompt(RECORD, blocking_condition=BLOCKING, drift=steady)
+
+    assert "Drift since" not in prompt
+    memo = draft_memo(FakeModel(), RECORD, blocking_condition=BLOCKING, drift=steady)
+    assert memo["drifted"] is False
+
+
+def test_drift_is_optional_so_the_plain_memo_still_works():
+    memo = draft_memo(FakeModel(), RECORD, blocking_condition=BLOCKING)
+    assert memo["drifted"] is False

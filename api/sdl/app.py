@@ -33,6 +33,7 @@ from sdl.agent_proxy import resource_name as agent_resource_name
 from sdl.service import (
     DEFAULT_POLICY_REVISION,
     blocking_condition,
+    compare_recorded,
     evidence_groups,
     make_decision,
     preview_decision,
@@ -334,10 +335,25 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"no decision {decision_id}")
 
         decision = Decision(outcome=record.outcome, rule_hits=list(record.rule_hits))
+
+        # Drift is looked up unconditionally rather than behind a flag. A memo
+        # about a decision that has since drifted, written as though it had
+        # not, is the handoff failing at the moment it matters: the reviewer is
+        # told what was true in July and not what is true now.
+        snapshot = read_snapshot(executor, record.snapshot_id)
+        drift = (
+            compare_recorded(executor, record, snapshot)
+            if snapshot is not None
+            else None
+        )
+
         try:
             model = GeminiRationaleModel(vertex_client(), max_output_tokens=900)
             return draft_memo(
-                model, record, blocking_condition=blocking_condition(decision)
+                model,
+                record,
+                blocking_condition=blocking_condition(decision),
+                drift=drift,
             )
         except Exception as error:
             # A memo with no body is nothing, so this is reported rather than
@@ -355,55 +371,7 @@ def create_app() -> FastAPI:
         snapshot = read_snapshot(executor, record.snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=409, detail="snapshot unavailable")
-
-        from sdl.ledger import current_max_revision
-
-        latest = current_max_revision(executor, record.title_id)
-        policy, _sha = read_policy(executor, record.policy_revision)
-        current_facts, _evidence = resolve_facts(
-            executor, record.title_id, record.territory_code, latest
-        )
-        current = evaluate(
-            ReleaseRequest(
-                title_id=record.title_id,
-                territory_code=record.territory_code,
-                effective_at=record.effective_at,
-            ),
-            current_facts,
-            policy,
-        )
-
-        differences = []
-        if current.outcome != record.outcome:
-            differences.append(
-                f"Current data would produce {current.outcome} for the same date; "
-                f"the record stands at {record.outcome}."
-            )
-        if latest != snapshot.max_revision:
-            differences.append(
-                f"Evidence has moved from revision {snapshot.max_revision} to {latest} "
-                "since this decision was recorded."
-            )
-
-        return {
-            "historical": {
-                "outcome": record.outcome,
-                "rule_hits": list(record.rule_hits),
-                "max_revision": snapshot.max_revision,
-                "snapshot_id": snapshot.snapshot_id,
-                "decided_at": record.decided_at.isoformat(),
-            },
-            "current": {
-                "outcome": current.outcome,
-                "rule_hits": list(current.rule_hits),
-                "max_revision": latest,
-                "blocking_condition": blocking_condition(current),
-            },
-            "differences": differences,
-            # The comparison surface never writes. Saying so in the payload
-            # keeps the console honest about what it is showing.
-            "record_unchanged": True,
-        }
+        return compare_recorded(executor, record, snapshot)
 
     # The built console is served from the same origin as the API, so the
     # client's relative /api paths need no proxy and no CORS in production.

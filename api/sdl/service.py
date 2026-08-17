@@ -215,6 +215,70 @@ def preview_decision(
     )
 
 
+def compare_recorded(
+    executor: Executor,
+    record: DecisionRecord,
+    snapshot: EvidenceSnapshot,
+) -> dict:
+    """Re-evaluate a recorded decision against current evidence.
+
+    Shared by the comparison endpoint and the memo drafter so a memo about
+    drift and the surface that reports drift can never disagree. Takes no
+    writer: the record is read, never touched.
+
+    The decision is re-evaluated under the policy revision it was recorded
+    against, not the current default. Comparing against a newer policy would
+    conflate two different questions — has the evidence moved, and has the
+    rulebook moved — and only the first is drift.
+    """
+    latest = current_max_revision(executor, record.title_id)
+    policy, _sha = read_policy(executor, record.policy_revision)
+    current_facts, _evidence = resolve_facts(
+        executor, record.title_id, record.territory_code, latest
+    )
+    current = evaluate(
+        ReleaseRequest(
+            title_id=record.title_id,
+            territory_code=record.territory_code,
+            effective_at=record.effective_at,
+        ),
+        current_facts,
+        policy,
+    )
+
+    differences: list[str] = []
+    if current.outcome != record.outcome:
+        differences.append(
+            f"Current data would produce {current.outcome} for the same date; "
+            f"the record stands at {record.outcome}."
+        )
+    if latest != snapshot.max_revision:
+        differences.append(
+            f"Evidence has moved from revision {snapshot.max_revision} to {latest} "
+            "since this decision was recorded."
+        )
+
+    return {
+        "historical": {
+            "outcome": record.outcome,
+            "rule_hits": list(record.rule_hits),
+            "max_revision": snapshot.max_revision,
+            "snapshot_id": snapshot.snapshot_id,
+            "decided_at": record.decided_at.isoformat(),
+        },
+        "current": {
+            "outcome": current.outcome,
+            "rule_hits": list(current.rule_hits),
+            "max_revision": latest,
+            "blocking_condition": blocking_condition(current),
+        },
+        "differences": differences,
+        # The comparison never writes. Saying so in the payload keeps every
+        # consumer honest about what it is showing.
+        "record_unchanged": True,
+    }
+
+
 def make_decision(
     executor: Executor,
     writer: Writer,

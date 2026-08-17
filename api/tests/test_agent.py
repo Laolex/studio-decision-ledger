@@ -114,11 +114,16 @@ def test_a_failing_api_becomes_a_reported_error_not_an_exception():
     assert "outcome" not in result
 
 
-def test_the_agent_holds_only_permitted_tools():
+def test_the_agent_holds_exactly_the_permitted_tools():
+    """Equality, not a subset.
+
+    A subset assertion passes when a tool is silently missing, which is how a
+    deployed agent ended up holding one tool while the spec named three.
+    """
     from sdl.agent import build_agent
 
     agent = build_agent(FakeClient(AVAILABLE_PAYLOAD))
-    assert set(tool_names(agent)) <= PERMITTED_TOOLS
+    assert set(tool_names(agent)) == PERMITTED_TOOLS
 
 
 def test_the_tool_module_exposes_no_write_capability():
@@ -234,8 +239,3 @@ def test_the_memo_tool_refuses_a_blank_decision_id():
     assert build_memo_tool(FakeFullClient())("  ")["error"]
 
 
-def test_the_agent_now_holds_all_three_permitted_tools():
-    from sdl.agent import build_agent
-
-    names = set(tool_names(build_agent(FakeFullClient())))
-    assert names == PERMITTED_TOOLS
