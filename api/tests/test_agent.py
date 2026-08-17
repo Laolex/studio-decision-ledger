@@ -239,3 +239,16 @@ def test_the_memo_tool_refuses_a_blank_decision_id():
     assert build_memo_tool(FakeFullClient())("  ")["error"]
 
 
+
+
+def test_the_instruction_tells_the_agent_to_chain_rather_than_ask():
+    """A compound request must not stall on a clarifying question.
+
+    Asked "what changed, is it at risk, and prepare the handoff", the deployed
+    agent replied "which would you like first?" and called no tool at all —
+    which undershoots the multi-step orchestration the product is for.
+    """
+    from sdl.agent import INSTRUCTION
+
+    assert "carry out all of them in order" in INSTRUCTION
+    assert "Do not ask which part to do first" in INSTRUCTION
