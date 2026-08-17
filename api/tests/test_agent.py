@@ -145,3 +145,97 @@ def test_a_blank_title_is_refused_before_a_call_is_made(bad):
 
     assert result["error"]
     assert client.calls == []
+
+
+DRIFT_PAYLOAD = {
+    "historical": {"outcome": "AVAILABLE", "max_revision": 1, "snapshot_id": "RS-1"},
+    "current": {
+        "outcome": "HOLD",
+        "max_revision": 3,
+        "blocking_condition": "The territory grant does not cover this release path.",
+    },
+    "differences": ["Current data would produce HOLD for the same date."],
+    "record_unchanged": True,
+}
+
+MEMO_PAYLOAD = {
+    "subject": "NORTHSTAR-S01E06 — release gate HOLD for NG",
+    "body": "Escalating for rights review.",
+    "grounded_in": {
+        "decision_id": "D-1846",
+        "snapshot_id": "RS-1",
+        "policy_revision": "POL-2026.08",
+    },
+    "sent": False,
+}
+
+
+class FakeFullClient(FakeClient):
+    def __init__(self, drift_payload=DRIFT_PAYLOAD, memo_payload=MEMO_PAYLOAD, **kw):
+        super().__init__(**kw)
+        self._drift = drift_payload
+        self._memo = memo_payload
+        self.drift_calls: list[str] = []
+
+    def drift(self, *, decision_id):
+        self.drift_calls.append(decision_id)
+        if isinstance(self._drift, Exception):
+            raise self._drift
+        return self._drift
+
+    def memo(self, *, decision_id):
+        if isinstance(self._memo, Exception):
+            raise self._memo
+        return self._memo
+
+
+def test_drift_reports_both_outcomes_and_that_the_record_stands():
+    from sdl.agent import build_drift_tool
+
+    result = build_drift_tool(FakeFullClient())("D-1846")
+
+    assert result["recorded_outcome"] == "AVAILABLE"
+    assert result["current_outcome"] == "HOLD"
+    assert result["drifted"] is True
+    assert result["record_unchanged"] is True
+
+
+def test_no_differences_means_no_drift():
+    from sdl.agent import build_drift_tool
+
+    payload = {**DRIFT_PAYLOAD, "differences": []}
+    result = build_drift_tool(FakeFullClient(drift_payload=payload))("D-1846")
+
+    assert result["drifted"] is False
+
+
+def test_a_drift_failure_is_returned_as_data():
+    from sdl.agent import build_drift_tool
+
+    client = FakeFullClient(drift_payload=RuntimeError("compare unavailable"))
+    result = build_drift_tool(client)("D-1846")
+
+    assert result["error"]
+    assert "recorded_outcome" not in result
+
+
+def test_the_memo_tool_returns_a_draft_marked_unsent():
+    from sdl.agent import build_memo_tool
+
+    result = build_memo_tool(FakeFullClient())("D-1846")
+
+    assert result["sent"] is False
+    assert result["grounded_in"]["decision_id"] == "D-1846"
+
+
+def test_the_memo_tool_refuses_a_blank_decision_id():
+    from sdl.agent import build_memo_tool
+
+    assert build_memo_tool(FakeFullClient())("  ")["error"]
+
+
+def test_the_agent_now_holds_all_three_permitted_tools():
+    from sdl.agent import build_agent
+
+    names = set(tool_names(build_agent(FakeFullClient())))
+    assert names == PERMITTED_TOOLS

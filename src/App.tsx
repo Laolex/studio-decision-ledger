@@ -21,6 +21,7 @@ import AgentPanel from "./AgentPanel";
 import {
   ablateDecision,
   compareDecision,
+  draftMemo,
   formatDate,
   getDecision,
   recordDecision,
@@ -29,6 +30,7 @@ import {
   type ComparisonPayload,
   type DecisionPayload,
   type EvidenceGroup,
+  type MemoPayload,
   type Tone,
   type VerificationPayload,
 } from "./api";
@@ -84,6 +86,22 @@ export default function App() {
   const [comparison, setComparison] = useState<ComparisonPayload | null>(null);
 
   const [showMemo, setShowMemo] = useState(false);
+  const [memo, setMemo] = useState<MemoPayload | null>(null);
+  const [memoError, setMemoError] = useState("");
+  const [draftingMemo, setDraftingMemo] = useState(false);
+
+  // Drafted on open rather than on load: a memo nobody asked for is a model
+  // call nobody needed, and the draft is not stored anywhere.
+  const openMemo = useCallback(() => {
+    setShowMemo(true);
+    if (memo || draftingMemo) return;
+    setDraftingMemo(true);
+    setMemoError("");
+    draftMemo(DEMO_DECISION_ID)
+      .then(setMemo)
+      .catch((error) => setMemoError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setDraftingMemo(false));
+  }, [memo, draftingMemo]);
 
   const [showAblation, setShowAblation] = useState(false);
   const [ablation, setAblation] = useState<AblationPayload | null>(null);
@@ -305,7 +323,7 @@ export default function App() {
               )}
             </div>
             <div className="drift-actions">
-              <Button kind="secondary" renderIcon={Document} onClick={() => setShowMemo(true)}>
+              <Button kind="secondary" renderIcon={Document} onClick={openMemo}>
                 Draft escalation memo
               </Button>
               <button className="text-button">Assign review <ArrowRight size={15} /></button>
@@ -526,25 +544,35 @@ export default function App() {
 
       <Modal
         open={showMemo}
-        modalHeading="Clearance escalation memo"
-        primaryButtonText="Copy memo"
+        modalHeading="Clearance escalation memo — draft"
+        primaryButtonText="Copy draft"
         secondaryButtonText="Close"
         onRequestSubmit={() => setShowMemo(false)}
         onRequestClose={() => setShowMemo(false)}
       >
         <div className="modal-copy">
-          <p><b>Subject:</b> North Star S1E6 — release gate {decision.outcome} for Nigeria</p>
-          <p>
-            {decision.blocking_condition ||
-              "No blocking condition is recorded against this decision."}
-          </p>
-          <div className="verification-state neutral">
-            <Document size={20} />
-            <span>
-              Grounded in decision {decision.decision_id}, snapshot {decision.snapshot_id}, and
-              policy {decision.policy_revision}.
-            </span>
-          </div>
+          {draftingMemo && <InlineLoading description="Drafting…" />}
+          {memoError && (
+            <div className="verification-state warning">
+              <ErrorFilled size={20} />
+              <span>{memoError}</span>
+            </div>
+          )}
+          {memo && (
+            <>
+              <p><b>Subject:</b> {memo.subject}</p>
+              <p>{memo.body}</p>
+              <div className="verification-state neutral">
+                <Document size={20} />
+                <span>
+                  Grounded in decision {memo.grounded_in.decision_id}, snapshot{" "}
+                  {memo.grounded_in.snapshot_id}, and policy{" "}
+                  {memo.grounded_in.policy_revision}. This is a draft — sending it
+                  is a human action.
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </main>

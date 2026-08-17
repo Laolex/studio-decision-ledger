@@ -181,11 +181,11 @@ Honest state of the build:
 - [x] Deterministic policy evaluator (11 tests)
 - [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
 - [x] Gemini rationale model on Vertex AI, behind the model seam (7 tests)
-- [ ] ADK agent on Vertex AI Agent Engine — orchestration and missing-fact identification
+- [x] ADK agent on Vertex AI Agent Engine — three read-only tools, transcript shown in the console
 - [x] Decision-record write path
 - [x] Replay verifier (39 tests)
 - [x] Current-vs-historical comparison surface
-- [ ] Hosted deployment
+- [x] Hosted deployment — Cloud Run, console and API on one origin
 
 ## Licence
 
