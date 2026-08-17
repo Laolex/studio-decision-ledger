@@ -12,6 +12,13 @@ verifier already refuses to claim a new invocation reproduces earlier text. But
 identical decisions producing needlessly different paragraphs is noise a reviewer
 has to read, and there is nothing to gain from sampling here.
 
+Thinking is disabled. gemini-2.5-flash is a reasoning model and its thinking
+tokens are drawn from the same `max_output_tokens` budget as its prose, so a
+short budget produces a sentence that stops mid-clause rather than a short
+answer. Neither the rationale nor the memo asks the model to reason — the
+outcome is already determined and the facts are supplied — so the budget is
+better spent entirely on the words.
+
 Errors propagate. `rationale.explain_decision` catches them and records the
 decision without an explanation, which is the correct end-to-end behaviour. If
 this class swallowed the error instead, a misconfigured deployment would look
@@ -55,11 +62,13 @@ class GeminiRationaleModel:
     """Turns a prompt into an explanation. One implementation of the seam."""
 
     def __init__(self, client: Any, model: str = DEFAULT_MODEL,
-                 temperature: float = 0.0, max_output_tokens: int = 320) -> None:
+                 temperature: float = 0.0, max_output_tokens: int = 320,
+                 thinking_budget: int = 0) -> None:
         self._client = client
         self._model = model
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._thinking_budget = thinking_budget
 
     def explain(self, prompt: str) -> str:
         """Return the model's text, or an empty string if it produced none."""
@@ -69,6 +78,7 @@ class GeminiRationaleModel:
             config={
                 "temperature": self._temperature,
                 "max_output_tokens": self._max_output_tokens,
+                "thinking_config": {"thinking_budget": self._thinking_budget},
             },
         )
         text = getattr(response, "text", None)
@@ -81,5 +91,6 @@ class GeminiRationaleModel:
             "model": self._model,
             "temperature": self._temperature,
             "max_output_tokens": self._max_output_tokens,
+            "thinking_budget": self._thinking_budget,
             "prompt_template_revision": PROMPT_TEMPLATE_REVISION,
         }

@@ -105,3 +105,17 @@ def test_deterministic_by_default():
     variation across identical decisions is noise a reviewer has to read."""
     model = GeminiRationaleModel(client=FakeClient(FakeResponse("ok")), model="m")
     assert model.configuration()["temperature"] == 0.0
+
+
+def test_thinking_is_disabled_by_default():
+    """Thinking tokens come out of the same budget as the prose.
+
+    gemini-2.5-flash spent a 320-token budget reasoning and returned a
+    sentence that stopped mid-clause. Neither caller asks it to reason: the
+    outcome is already determined and the facts are supplied.
+    """
+    client = FakeClient(FakeResponse("body"))
+    GeminiRationaleModel(client).explain("prompt")
+
+    config = client.models.calls[0]["config"]
+    assert config["thinking_config"]["thinking_budget"] == 0

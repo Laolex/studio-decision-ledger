@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
 
         decision = Decision(outcome=record.outcome, rule_hits=list(record.rule_hits))
         try:
-            model = GeminiRationaleModel(vertex_client())
+            model = GeminiRationaleModel(vertex_client(), max_output_tokens=900)
             return draft_memo(
                 model, record, blocking_condition=blocking_condition(decision)
             )
