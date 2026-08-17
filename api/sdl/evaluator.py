@@ -71,12 +71,41 @@ class ContinuityException:
 
 
 @dataclass(frozen=True)
+class SyntheticContent:
+    """Generation provenance recorded against an asset.
+
+    `generation_kind` is one of SYNTHETIC, ASSISTED or NONE. It is a recorded
+    fact retrieved into the snapshot, never inferred from the asset itself and
+    never supplied by the model (SPEC invariant 19).
+    """
+
+    record_id: str
+    asset_ref: str
+    generation_kind: str
+    tool_ref: str
+    disclosure_obligation_ref: str
+
+
+@dataclass(frozen=True)
+class PerformerConsent:
+    consent_id: str
+    performer_ref: str
+    consent_scope: str
+    territory_code: str
+    valid_from: datetime
+    valid_to: datetime
+    status: str
+
+
+@dataclass(frozen=True)
 class Facts:
     licenses: list[License] = field(default_factory=list)
     clearances: list[Clearance] = field(default_factory=list)
     ratings: list[Rating] = field(default_factory=list)
     deliveries: list[Delivery] = field(default_factory=list)
     continuity_exceptions: list[ContinuityException] = field(default_factory=list)
+    synthetic_content: list[SyntheticContent] = field(default_factory=list)
+    performer_consents: list[PerformerConsent] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -133,6 +162,19 @@ def evaluate(request: ReleaseRequest, facts: Facts, policy: dict) -> Decision:
     if any(len(group) == 0 for group in required) or contradictory:
         return Decision(outcome="ESCALATE", rule_hits=["ESC-001"])
 
+    # SYN-001 also escalates, and for the same reason: an asset recorded as
+    # generated with no consent on file anywhere is a gap in the record, not a
+    # condition that failed. It is checked before the HOLD rules so a knowable
+    # block never masks an unknowable one — reporting HOLD with a tidy reason
+    # would be a determination the evidence does not support.
+    generated = [
+        record
+        for record in facts.synthetic_content
+        if record.generation_kind in ("SYNTHETIC", "ASSISTED")
+    ]
+    if generated and not facts.performer_consents:
+        return Decision(outcome="ESCALATE", rule_hits=["SYN-001"])
+
     covering = [
         licence
         for licence in facts.licenses
@@ -180,6 +222,21 @@ def evaluate(request: ReleaseRequest, facts: Facts, policy: dict) -> Decision:
         for exception in facts.continuity_exceptions
     ):
         rule_hits.append("CNT-001")
+
+    # CON-001. Consent is on file; the question is whether it reaches this
+    # request. Scope is satisfied by an explicit likeness grant or by a grant
+    # of both — a voice-only consent does not cover a de-aged image.
+    if generated:
+        covering_consent = [
+            consent
+            for consent in facts.performer_consents
+            if consent.territory_code == request.territory_code
+            and consent.status == "ACTIVE"
+            and consent.consent_scope in ("likeness", "both")
+            and _covers(consent.valid_from, consent.valid_to, request.effective_at)
+        ]
+        if not covering_consent:
+            rule_hits.append("CON-001")
 
     if rule_hits:
         return Decision(outcome="HOLD", rule_hits=rule_hits)

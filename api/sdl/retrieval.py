@@ -18,6 +18,13 @@ TABLE_KEYS: dict[str, tuple[str, bool]] = {
     "ratings": ("rating_id", True),
     "deliveries": ("delivery_id", False),
     "continuity_exceptions": ("exception_id", False),
+    "synthetic_content": ("record_id", False),
+    # Not territory-scoped on purpose. Filtering consents to the requested
+    # territory in SQL would make a consent granted for another territory
+    # indistinguishable from no consent at all, and those are different
+    # outcomes: HOLD for the first, ESCALATE for the second. The evaluator
+    # decides coverage; retrieval only decides what is knowable.
+    "performer_consents": ("consent_id", False),
 }
 
 

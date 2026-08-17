@@ -83,6 +83,8 @@ def test_evidence_covers_every_table_with_a_hash_and_row_count(http_executor):
         "ratings",
         "deliveries",
         "continuity_exceptions",
+        "synthetic_content",
+        "performer_consents",
     }
     for item in evidence:
         assert item.canonical_query.startswith("SELECT *")

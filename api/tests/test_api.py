@@ -44,7 +44,7 @@ def test_recording_a_decision_returns_the_outcome_and_a_binding(client):
     assert body["outcome"] in {"AVAILABLE", "HOLD", "ESCALATE"}
     assert body["decision_id"].startswith("D-")
     assert body["snapshot_id"].startswith("RS-")
-    assert body["policy_revision"] == "POL-2026.07"
+    assert body["policy_revision"] == "POL-2026.08"
 
 
 def test_a_decision_made_now_sees_the_backdated_correction(client):
