@@ -7,9 +7,9 @@ receipt exists.
 
 Three properties hold it in place.
 
-*It cannot write.* The agent's only tool reaches `POST /api/evidence`, the
-read-only evaluate path. Nothing here imports `sdl.ledger`, and a test asserts
-that. An operator can type anything into a deployed agent, so the control has
+*It cannot write.* Every tool reaches a read-only surface — the evaluate path,
+the comparison endpoint, and the memo drafter, none of which take a writer.
+Nothing here imports `sdl.ledger`, and a test asserts that. An operator can type anything into a deployed agent, so the control has
 to be structural; a system instruction telling the model to behave is not a
 control, it is a request.
 
@@ -309,7 +309,7 @@ def build_memo_tool(client: SDLClient):
 
 
 def build_agent(client: SDLClient, model: str = DEFAULT_MODEL):
-    """The ADK agent, holding exactly one read-only tool."""
+    """The ADK agent, holding the three read-only tools SPEC permits."""
     from google.adk.agents import Agent
 
     return Agent(

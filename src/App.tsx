@@ -6,7 +6,7 @@ import {
   Document,
   ErrorFilled,
   FlashFilled,
-  Launch,
+  Copy,
   Locked,
   PlayFilledAlt,
   Search,
@@ -21,6 +21,7 @@ import AgentPanel from "./AgentPanel";
 import {
   ablateDecision,
   compareDecision,
+  copyText,
   draftMemo,
   formatDate,
   getDecision,
@@ -86,14 +87,36 @@ export default function App() {
   const [comparison, setComparison] = useState<ComparisonPayload | null>(null);
 
   const [showMemo, setShowMemo] = useState(false);
+  const [memoCopied, setMemoCopied] = useState(false);
   const [memo, setMemo] = useState<MemoPayload | null>(null);
   const [memoError, setMemoError] = useState("");
   const [draftingMemo, setDraftingMemo] = useState(false);
+
+  // Copies the draft rather than closing the modal, which is what the button
+  // said it did. The modal stays open so the operator can see it worked.
+  const copyMemo = useCallback(() => {
+    if (!memo) return;
+    const text = [
+      memo.subject,
+      "",
+      memo.body,
+      "",
+      `Decision ${memo.grounded_in.decision_id} · snapshot ${memo.grounded_in.snapshot_id} · policy ${memo.grounded_in.policy_revision}`,
+      "Draft — not sent.",
+    ].join("\n");
+    void copyText(text).then((ok) => {
+      if (ok) {
+        setMemoCopied(true);
+        window.setTimeout(() => setMemoCopied(false), 2000);
+      }
+    });
+  }, [memo]);
 
   // Drafted on open rather than on load: a memo nobody asked for is a model
   // call nobody needed, and the draft is not stored anywhere.
   const openMemo = useCallback(() => {
     setShowMemo(true);
+    setMemoCopied(false);
     if (memo || draftingMemo) return;
     setDraftingMemo(true);
     setMemoError("");
@@ -326,7 +349,6 @@ export default function App() {
               <Button kind="secondary" renderIcon={Document} onClick={openMemo}>
                 Draft escalation memo
               </Button>
-              <button className="text-button">Assign review <ArrowRight size={15} /></button>
             </div>
           </article>
         </section>
@@ -399,8 +421,15 @@ export default function App() {
               <button className="text-button" onClick={openAblation}>
                 Test the binding <ArrowRight size={15} />
               </button>
-              <button className="text-button">
-                Manifest {decision.source_manifest_hash.slice(0, 12)}… <Launch size={14} />
+              {/* A value, not a destination. It previously carried a Launch
+                  icon and no handler, which promised a page that does not
+                  exist. Full hash on hover; click copies it. */}
+              <button
+                className="text-button"
+                title={decision.source_manifest_hash}
+                onClick={() => void copyText(decision.source_manifest_hash)}
+              >
+                Manifest {decision.source_manifest_hash.slice(0, 12)}… <Copy size={14} />
               </button>
             </div>
           </article>
@@ -545,9 +574,10 @@ export default function App() {
       <Modal
         open={showMemo}
         modalHeading="Clearance escalation memo — draft"
-        primaryButtonText="Copy draft"
+        primaryButtonText={memoCopied ? "Copied" : "Copy draft"}
         secondaryButtonText="Close"
-        onRequestSubmit={() => setShowMemo(false)}
+        primaryButtonDisabled={!memo}
+        onRequestSubmit={copyMemo}
         onRequestClose={() => setShowMemo(false)}
       >
         <div className="modal-copy">
