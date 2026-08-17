@@ -19,7 +19,13 @@ from sdl.ledger import (
     write_decision,
     write_snapshot,
 )
-from sdl.record import DecisionRecord, EvidenceSnapshot, build_snapshot
+from sdl.rationale import explain_decision
+from sdl.record import (
+    DecisionRecord,
+    EvidenceSnapshot,
+    build_snapshot,
+    canonical_json,
+)
 from sdl.resolve import Executor, QueryEvidence, resolve_facts
 
 # POL-2026.08 adds the synthetic-content rules. Decisions already recorded
@@ -291,6 +297,7 @@ def make_decision(
     max_revision: int | None = None,
     decision_id: str | None = None,
     snapshot_id: str | None = None,
+    model=None,
 ) -> RecordedDecision:
     """Record a decision.
 
@@ -302,6 +309,12 @@ def make_decision(
     The evaluation itself is `preview_decision`. Sharing that path is what
     guarantees the agent's explanation and the recorded receipt can never
     describe different outcomes for the same evidence.
+
+    `model` is optional and is asked for an explanation only after the outcome
+    is settled. A decision recorded without one is complete and verifiable; it
+    simply replays at C2 rather than C3_BOUNDARY, because there is no rationale
+    boundary to report. An unavailable model therefore costs an explanation and
+    never a decision.
     """
     now = now or datetime.now(timezone.utc)
     previewed = preview_decision(
@@ -318,6 +331,28 @@ def make_decision(
     max_revision = previewed.max_revision
     policy_sha256 = previewed.policy_sha256
 
+    rationale = ""
+    model_config = ""
+    template_revision = ""
+    if model is not None:
+        # explain_decision swallows model failures and returns "" — the
+        # decision is already made, so a failure here is not an outage.
+        rationale = explain_decision(
+            model,
+            decision,
+            facts,
+            title_id=title_id,
+            territory_code=territory_code,
+            effective_at=effective_at,
+        ).strip()
+        if rationale:
+            # Whitespace is not an explanation. Stored as-is it would push the
+            # record to C3_BOUNDARY, claiming a rationale boundary exists when
+            # there is nothing behind it.
+            configuration = getattr(model, "configuration", dict)() or {}
+            model_config = canonical_json(configuration)
+            template_revision = configuration.get("prompt_template_revision", "")
+
     snapshot = build_snapshot(
         evidence, snapshot_id or _timestamp_id("RS", now), now, max_revision=max_revision
     )
@@ -332,6 +367,9 @@ def make_decision(
         outcome=decision.outcome,
         rule_hits=list(decision.rule_hits),
         decided_at=now,
+        model_rationale=rationale,
+        model_config=model_config,
+        prompt_template_revision=template_revision,
     )
 
     # Snapshot first: a decision naming a snapshot that does not exist would be
