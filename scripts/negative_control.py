@@ -188,7 +188,7 @@ def build_fixture():
         model_rationale=(
             "Every mandatory condition is met for this territory and date."
         ),
-        model_config='{"provider":"vertex-ai","model":"gemini-2.5-flash"}',
+        model_config='{"provider":"vertex-ai","model":"gemini-3.5-flash"}',
         prompt_template_revision="rationale-control",
     )
     return record, snapshot

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # what produced it — the same discipline as rationale's template revision.
 AGENT_INSTRUCTION_REVISION = "agent-2026-08-17b"
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"
 
 # SPEC "Architecture": the agent's permitted tools. Widening this set is a
 # deliberate act, and the test that reads it should fail first.

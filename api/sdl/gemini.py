@@ -12,7 +12,7 @@ verifier already refuses to claim a new invocation reproduces earlier text. But
 identical decisions producing needlessly different paragraphs is noise a reviewer
 has to read, and there is nothing to gain from sampling here.
 
-Thinking is disabled. gemini-2.5-flash is a reasoning model and its thinking
+Thinking is disabled. gemini-3.5-flash is a reasoning model and its thinking
 tokens are drawn from the same `max_output_tokens` budget as its prose, so a
 short budget produces a sentence that stops mid-clause rather than a short
 answer. Neither the rationale nor the memo asks the model to reason — the
@@ -35,7 +35,7 @@ from typing import Any
 # beside every rationale so an explanation can be attributed to what produced it.
 PROMPT_TEMPLATE_REVISION = "rationale-2026-08-10"
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"
 
 
 def vertex_client(project: str | None = None, location: str | None = None) -> Any:
