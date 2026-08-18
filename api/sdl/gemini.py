@@ -38,8 +38,15 @@ PROMPT_TEMPLATE_REVISION = "rationale-2026-08-10"
 DEFAULT_MODEL = "gemini-3.5-flash"
 
 # Where the MODEL is served, which is not where our resources live.
-# gemini-3.5-flash is published only from `global`; every regional endpoint
-# returns 404 (verified against this project: us-central1 404, global 200).
+#
+# A Vertex publisher model is a per-region resource, and a new model is enabled
+# region by region. Where it is not enabled the resource genuinely does not
+# exist, so 404 is the literally correct answer rather than a capacity error.
+# gemini-3.5-flash is served from some regions and not others — measured against
+# this project on 2026-08-18: global 200, europe-west2 200, us-central1 404,
+# europe-west4 404. `global` is the safe default because it routes to wherever
+# the model actually is, and that set will grow as the rollout continues.
+#
 # GOOGLE_CLOUD_LOCATION stays us-central1 because the Agent Engine and Cloud Run
 # service genuinely are there, so the model's serving location has to be its own
 # fact rather than a reuse of the resource region. Overridable for a model that

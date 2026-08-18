@@ -320,8 +320,10 @@ def build_agent(client: SDLClient, model: str = DEFAULT_MODEL):
     return Agent(
         name="sdl_release_agent",
         # The model is pinned to the location it is actually served from, rather
-        # than inheriting the deployment's region. gemini-3.5-flash is published
-        # only from `global` and every regional endpoint 404s, but the Agent
+        # than inheriting the deployment's region. A Vertex publisher model is a
+        # per-region resource: gemini-3.5-flash is served from global and
+        # europe-west2 but 404s from us-central1 and europe-west4 (measured
+        # 2026-08-18), and that set grows as the rollout continues. The Agent
         # Engine this runs on genuinely lives in us-central1 — so scoping global
         # to the model is right and setting GOOGLE_CLOUD_LOCATION=global is not:
         # that would send the runtime looking for the engine in a region where it
