@@ -252,3 +252,20 @@ def test_the_instruction_tells_the_agent_to_chain_rather_than_ask():
 
     assert "carry out all of them in order" in INSTRUCTION
     assert "Do not ask which part to do first" in INSTRUCTION
+
+
+def test_the_agents_model_is_pinned_to_where_it_is_served():
+    """gemini-3.5-flash is published only from `global`; every regional endpoint
+    404s. This agent is deployed to an Agent Engine in us-central1, so the model
+    cannot inherit the deployment's region — and the fix cannot be
+    GOOGLE_CLOUD_LOCATION=global either, which would send the runtime looking
+    for the engine in a region where it does not exist. Asserting the location
+    here because the failure is silent from the outside: a model error degrades
+    a decision to C2 with the record still valid, so C3_BOUNDARY would become
+    unreachable in production while every decision kept succeeding."""
+    from sdl.agent import build_agent
+
+    agent = build_agent(FakeClient(AVAILABLE_PAYLOAD))
+
+    assert agent.model.model == "gemini-3.5-flash"
+    assert agent.model.client_kwargs["location"] == "global"

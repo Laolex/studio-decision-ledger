@@ -37,6 +37,15 @@ PROMPT_TEMPLATE_REVISION = "rationale-2026-08-10"
 
 DEFAULT_MODEL = "gemini-3.5-flash"
 
+# Where the MODEL is served, which is not where our resources live.
+# gemini-3.5-flash is published only from `global`; every regional endpoint
+# returns 404 (verified against this project: us-central1 404, global 200).
+# GOOGLE_CLOUD_LOCATION stays us-central1 because the Agent Engine and Cloud Run
+# service genuinely are there, so the model's serving location has to be its own
+# fact rather than a reuse of the resource region. Overridable for a model that
+# is served regionally.
+DEFAULT_MODEL_LOCATION = "global"
+
 
 def vertex_client(project: str | None = None, location: str | None = None) -> Any:
     """Build a Vertex AI client from the ambient Google credentials.
@@ -49,7 +58,7 @@ def vertex_client(project: str | None = None, location: str | None = None) -> An
     from google import genai
 
     project = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    location = location or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    location = location or os.environ.get("GEMINI_LOCATION", DEFAULT_MODEL_LOCATION)
     if not project:
         raise RuntimeError(
             "GOOGLE_CLOUD_PROJECT is not set. Run `gcloud auth application-default "

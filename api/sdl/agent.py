@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 AGENT_INSTRUCTION_REVISION = "agent-2026-08-17b"
 
 DEFAULT_MODEL = "gemini-3.5-flash"
+# Where the model is served, which is not where this agent is deployed.
+MODEL_LOCATION = os.environ.get("GEMINI_LOCATION", "global")
 
 # SPEC "Architecture": the agent's permitted tools. Widening this set is a
 # deliberate act, and the test that reads it should fail first.
@@ -313,10 +315,18 @@ def build_memo_tool(client: SDLClient):
 def build_agent(client: SDLClient, model: str = DEFAULT_MODEL):
     """The ADK agent, holding the three read-only tools SPEC permits."""
     from google.adk.agents import Agent
+    from google.adk.models.google_llm import Gemini
 
     return Agent(
         name="sdl_release_agent",
-        model=model,
+        # The model is pinned to the location it is actually served from, rather
+        # than inheriting the deployment's region. gemini-3.5-flash is published
+        # only from `global` and every regional endpoint 404s, but the Agent
+        # Engine this runs on genuinely lives in us-central1 — so scoping global
+        # to the model is right and setting GOOGLE_CLOUD_LOCATION=global is not:
+        # that would send the runtime looking for the engine in a region where it
+        # does not exist. See MODEL_LOCATION for the override.
+        model=Gemini(model=model, client_kwargs={"location": MODEL_LOCATION}),
         description=(
             "Answers release-readiness questions for a title in a territory on a "
             "date, using bound evidence and a deterministic policy evaluator."

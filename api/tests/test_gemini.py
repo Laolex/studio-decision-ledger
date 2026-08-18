@@ -119,3 +119,74 @@ def test_thinking_is_disabled_by_default():
 
     config = client.models.calls[0]["config"]
     assert config["thinking_config"]["thinking_budget"] == 0
+
+
+class RecordingGenai:
+    """Stands in for `google.genai`, capturing how the client was constructed."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def Client(self, **kwargs):  # noqa: N802 - mirrors the genai API
+        self.kwargs = kwargs
+        return object()
+
+
+def _patch_genai(monkeypatch) -> RecordingGenai:
+    """`vertex_client` does `from google import genai`, which resolves the
+    attribute on the already-imported `google` package — so patching
+    sys.modules is not enough; the attribute itself has to be replaced."""
+    import types as pytypes
+
+    import google
+
+    recorder = RecordingGenai()
+    module = pytypes.ModuleType("google.genai")
+    module.Client = recorder.Client
+    monkeypatch.setattr(google, "genai", module, raising=False)
+    return recorder
+
+
+def test_the_client_is_built_where_the_model_is_actually_served(monkeypatch):
+    """gemini-3.5-flash is published only from `global`; a regional endpoint
+    returns 404. That failure is invisible from the outside, because a model
+    error degrades a decision to C2 with the record still valid — so
+    C3_BOUNDARY would quietly become unreachable in production while every
+    decision kept succeeding. The model's serving location must therefore not
+    be inherited from GOOGLE_CLOUD_LOCATION, which names where our Agent Engine
+    and Cloud Run service live (us-central1)."""
+    from sdl.gemini import vertex_client
+
+    recorder = _patch_genai(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "sdl-cinema-2026")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    monkeypatch.delenv("GEMINI_LOCATION", raising=False)
+
+    vertex_client()
+
+    assert recorder.kwargs["location"] == "global"
+    assert recorder.kwargs["project"] == "sdl-cinema-2026"
+
+
+def test_the_model_location_is_overridable_for_a_regionally_served_model(monkeypatch):
+    from sdl.gemini import vertex_client
+
+    recorder = _patch_genai(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "sdl-cinema-2026")
+    monkeypatch.setenv("GEMINI_LOCATION", "us-east5")
+
+    vertex_client()
+
+    assert recorder.kwargs["location"] == "us-east5"
+
+
+def test_an_explicit_location_argument_still_wins(monkeypatch):
+    from sdl.gemini import vertex_client
+
+    recorder = _patch_genai(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "sdl-cinema-2026")
+    monkeypatch.setenv("GEMINI_LOCATION", "us-east5")
+
+    vertex_client(location="europe-west4")
+
+    assert recorder.kwargs["location"] == "europe-west4"
