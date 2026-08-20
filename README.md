@@ -1,9 +1,16 @@
 # Studio Decision Ledger
 
-A release-governance agent for media distribution teams. It decides whether a
-title may be made available in a territory on a given date, records the
-evidence and policy that produced the outcome, and lets a reviewer **replay
-that decision later, after the underlying data has changed**.
+Six weeks ago, a distribution team correctly cleared an episode for release in
+Nigeria. Current rights evidence now blocks it. Studio Decision Ledger proves
+both statements, preserves the original decision, and tells the reviewer what
+evidence-bound work must happen next.
+
+It is the release decision layer for media distribution teams: decide whether a
+title may be made available in a territory on a given date, bind the outcome to
+the evidence and policy that produced it, then replay the decision after the
+underlying data changes without rewriting history.
+
+> Correct then. Blocked now. History stays intact.
 
 Built for the Agentic Cinema hackathon, **ClickHouse track**.
 
