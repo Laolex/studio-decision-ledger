@@ -109,6 +109,48 @@ def test_comparison_separates_the_record_from_current_state(client):
     assert comparison["record_unchanged"] is True
 
 
+def test_a_hold_exposes_a_source_bound_resolution_plan_without_writing(client, http_executor):
+    created = make_decision(client)
+    before = http_executor("SELECT count() AS n FROM sdl.decision_records")[0]["n"]
+
+    response = client.get(f"/api/decisions/{created['decision_id']}/resolution-plan")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["record_unchanged"] is True
+    assert body["items"][0]["rule_id"] == "LIC-002"
+    assert body["items"][0]["evidence_sources"][0]["result_hash"]
+    after = http_executor("SELECT count() AS n FROM sdl.decision_records")[0]["n"]
+    assert after == before
+
+
+def test_resolution_recheck_is_a_current_assessment_not_an_approval(client):
+    created = make_decision(client)
+    body = client.post(
+        f"/api/decisions/{created['decision_id']}/resolution-plan/recheck"
+    ).json()
+    assert body["record_unchanged"] is True
+    assert body["next_action"] in {"resolve the next open item", "record a new release decision"}
+
+
+def test_resolution_recheck_marks_source_outage_unknown(client, monkeypatch):
+    from sdl.mcp_executor import MCPQueryError
+
+    created = make_decision(client)
+
+    def unavailable(*_args, **_kwargs):
+        raise MCPQueryError("source unavailable")
+
+    monkeypatch.setattr("sdl.app.compare_recorded", unavailable)
+    body = client.post(
+        f"/api/decisions/{created['decision_id']}/resolution-plan/recheck"
+    ).json()
+
+    assert body["items"][0]["status"] == "UNKNOWN"
+    assert body["all_complete"] is False
+    assert body["record_unchanged"] is True
+
+
 def test_the_evidence_endpoint_answers_without_recording(client, http_executor):
     """What the operator-facing agent reaches.
 

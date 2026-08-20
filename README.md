@@ -150,9 +150,9 @@ Both required integrations are load-bearing, not decorative:
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing
   agent: it interprets the request, orchestrates evidence retrieval, identifies
   missing facts, and explains the outcome in plain language. The explanation step
-  runs on Gemini via Vertex AI today; the ADK agent that orchestrates retrieval
-  and identifies missing facts is **not yet built** — see Status. The deterministic path below is complete and does not depend on
-  it, by design: the model explains decisions, it never determines them.
+  and the ADK agent both run on Gemini through Vertex AI today. The deterministic
+  path below does not depend on either of them, by design: the model operates and
+  explains the workflow; it never determines the release gate.
 - **ClickHouse MCP server** — every decision-relevant fact is retrieved through
   the ClickHouse MCP server at runtime. The canonical query text and result
   hash from each MCP interaction are written into the decision record. There is
@@ -249,6 +249,11 @@ AVOD-only with retroactive effect. Keeping those two answers apart, and being
 able to prove each one, is the entire product.
 
 Re-running is safe — existing decisions are left alone rather than duplicated.
+
+Open `/?decision=D-1847` in the hosted console to inspect the later `HOLD` record.
+Its resolution plan names the blocking rule and bound evidence source, then rechecks
+completion by rerunning the rule against current evidence. A checkbox or model claim
+cannot mark the work complete, and the historical decision remains unchanged.
 
 ## Status
 
