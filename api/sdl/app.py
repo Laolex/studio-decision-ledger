@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sdl.canonical import canonical_rows
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import read_decision, read_policy, read_snapshot
+from sdl.mcp_executor import MCPQueryError
 from sdl.mcp_executor import ClickHouseMCPExecutor
 from sdl.resolve import resolve_facts
 from sdl.agent_proxy import VertexAgentEngine
@@ -40,6 +41,7 @@ from sdl.service import (
     preview_decision,
 )
 from sdl.verifier import verify
+from sdl.resolution import UnsupportedRule, build_resolution_plan
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +396,56 @@ def create_app() -> FastAPI:
         if snapshot is None:
             raise HTTPException(status_code=409, detail="snapshot unavailable")
         return compare_recorded(executor, record, snapshot)
+
+    def resolution_plan_for(decision_id: str, executor) -> dict:
+        record = read_decision(executor, decision_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"no decision {decision_id}")
+        snapshot = read_snapshot(executor, record.snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=409, detail="snapshot unavailable")
+        try:
+            comparison = compare_recorded(executor, record, snapshot)
+            current_rule_hits: list[str] | None = list(
+                comparison["current"]["rule_hits"]
+            )
+        except (MCPQueryError, FileNotFoundError, TimeoutError):
+            # Source unavailability is an evidence state, not permission to
+            # infer that a blocker remains open or has been resolved.
+            current_rule_hits = None
+        try:
+            items = build_resolution_plan(
+                record,
+                snapshot,
+                current_rule_hits=current_rule_hits,
+            )
+        except UnsupportedRule as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        all_complete = bool(items) and all(item.status == "COMPLETE" for item in items)
+        if not items:
+            next_action = "no blocking conditions to resolve"
+        elif all_complete:
+            next_action = "record a new release decision"
+        else:
+            next_action = "resolve the next open item"
+        return {
+            "decision_id": record.decision_id,
+            "snapshot_id": record.snapshot_id,
+            "policy_revision": record.policy_revision,
+            "assessed_at": datetime.now(timezone.utc).isoformat(),
+            "items": [item.to_dict() for item in items],
+            "all_complete": all_complete,
+            "record_unchanged": True,
+            "next_action": next_action,
+        }
+
+    @app.get("/api/decisions/{decision_id}/resolution-plan")
+    def get_resolution_plan(decision_id: str, executor=Depends(get_executor)) -> dict:
+        return resolution_plan_for(decision_id, executor)
+
+    @app.post("/api/decisions/{decision_id}/resolution-plan/recheck")
+    def recheck_resolution_plan(decision_id: str, executor=Depends(get_executor)) -> dict:
+        return resolution_plan_for(decision_id, executor)
 
     # The built console is served from the same origin as the API, so the
     # client's relative /api paths need no proxy and no CORS in production.

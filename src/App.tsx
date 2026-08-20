@@ -25,13 +25,16 @@ import {
   draftMemo,
   formatDate,
   getDecision,
+  getResolutionPlan,
   recordDecision,
+  recheckResolutionPlan,
   verifyDecision,
   type AblationPayload,
   type ComparisonPayload,
   type DecisionPayload,
   type EvidenceGroup,
   type MemoPayload,
+  type ResolutionPlanPayload,
   type Tone,
   type VerificationPayload,
 } from "./api";
@@ -45,6 +48,9 @@ const EFFECTIVE_AT = "2026-07-30T00:00:00Z";
 // minted decision instead would pin to current data, and the record could never
 // disagree with the present — which is the one thing worth seeing.
 const DEMO_DECISION_ID = "D-1846";
+const CURRENT_DECISION_ID = "D-1847";
+const REQUESTED_DECISION_ID =
+  new URLSearchParams(window.location.search).get("decision") || DEMO_DECISION_ID;
 
 const GROUP_ICONS: Record<string, ReactElement> = {
   "Rights & clearances": <Document size={18} aria-hidden="true" />,
@@ -85,6 +91,9 @@ export default function App() {
 
   const [showCompare, setShowCompare] = useState(false);
   const [comparison, setComparison] = useState<ComparisonPayload | null>(null);
+  const [resolutionPlan, setResolutionPlan] = useState<ResolutionPlanPayload | null>(null);
+  const [recheckingPlan, setRecheckingPlan] = useState(false);
+  const [resolutionError, setResolutionError] = useState("");
 
   const [showMemo, setShowMemo] = useState(false);
   const [memoCopied, setMemoCopied] = useState(false);
@@ -115,32 +124,36 @@ export default function App() {
   // Drafted on open rather than on load: a memo nobody asked for is a model
   // call nobody needed, and the draft is not stored anywhere.
   const openMemo = useCallback(() => {
+    if (!decision) return;
     setShowMemo(true);
     setMemoCopied(false);
     if (memo || draftingMemo) return;
     setDraftingMemo(true);
     setMemoError("");
-    draftMemo(DEMO_DECISION_ID)
+    draftMemo(decision.decision_id)
       .then(setMemo)
       .catch((error) => setMemoError(error instanceof Error ? error.message : String(error)))
       .finally(() => setDraftingMemo(false));
-  }, [memo, draftingMemo]);
+  }, [decision, memo, draftingMemo]);
 
   const [showAblation, setShowAblation] = useState(false);
   const [ablation, setAblation] = useState<AblationPayload | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getDecision(DEMO_DECISION_ID)
-      .catch(() =>
+    getDecision(REQUESTED_DECISION_ID)
+      .catch((error) => {
+        if (REQUESTED_DECISION_ID !== DEMO_DECISION_ID) throw error;
+        return (
         // Not bootstrapped yet — record one against current evidence so the
         // console still works on a fresh database.
         recordDecision({
           title_id: TITLE_ID,
           territory_code: TERRITORY,
           effective_at: EFFECTIVE_AT,
-        }),
-      )
+        })
+        );
+      })
       .then((payload) => {
         if (!cancelled) setDecision(payload);
       })
@@ -177,6 +190,24 @@ export default function App() {
   useEffect(() => {
     if (!decision) return;
     compareDecision(decision.decision_id).then(setComparison).catch(() => undefined);
+    setResolutionError("");
+    getResolutionPlan(decision.decision_id)
+      .then(setResolutionPlan)
+      .catch((error) =>
+        setResolutionError(error instanceof Error ? error.message : String(error)),
+      );
+  }, [decision]);
+
+  const recheckPlan = useCallback(() => {
+    if (!decision) return;
+    setRecheckingPlan(true);
+    setResolutionError("");
+    recheckResolutionPlan(decision.decision_id)
+      .then(setResolutionPlan)
+      .catch((error) =>
+        setResolutionError(error instanceof Error ? error.message : String(error)),
+      )
+      .finally(() => setRecheckingPlan(false));
   }, [decision]);
 
   if (loadError) {
@@ -269,7 +300,7 @@ export default function App() {
           <div className="decision-rule" />
           <div className="decision-content">
             <div>
-              <p className="eyebrow">Current release decision</p>
+              <p className="eyebrow">Recorded release decision</p>
               <h2 id="decision-title">{outcomeHeadline(decision.outcome)}</h2>
               <p className="decision-copy">{outcomeCopy(decision.outcome)}</p>
               {decision.blocking_condition && (
@@ -290,6 +321,48 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {resolutionPlan && resolutionPlan.items.length > 0 && (
+          <section className="resolution-section" aria-labelledby="resolution-title">
+            <div className="resolution-intro">
+              <p className="eyebrow">Verified resolution plan</p>
+              <h2 id="resolution-title">A finite path back to a release decision.</h2>
+              <p>
+                Completion comes from rerunning the original rule against current evidence,
+                never from checking a box. The historical decision remains unchanged.
+              </p>
+              <Button kind="tertiary" size="sm" disabled={recheckingPlan} onClick={recheckPlan}>
+                {recheckingPlan ? "Rechecking…" : "Recheck current evidence"}
+              </Button>
+            </div>
+            <div className="resolution-list">
+              {resolutionPlan.items.map((item) => (
+                <article className={`resolution-item ${item.status.toLowerCase()}`} key={item.rule_id}>
+                  <div className="resolution-item-head">
+                    <Tag type={item.status === "COMPLETE" ? "green" : item.status === "UNKNOWN" ? "purple" : "red"}>
+                      {item.status}
+                    </Tag>
+                    <code>{item.rule_id}</code>
+                  </div>
+                  <h3>{item.instruction}</h3>
+                  <p>{item.completion_condition}</p>
+                  <small>
+                    {item.evidence_sources.length > 0
+                      ? `${item.evidence_sources.map((source) => source.table_name).join(", ")} · snapshot ${resolutionPlan.snapshot_id}`
+                      : `Evidence acquisition required · snapshot ${resolutionPlan.snapshot_id}`}
+                  </small>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {resolutionError && (
+          <section className="resolution-error" role="status">
+            <WarningFilled size={18} />
+            <span><b>Resolution plan unavailable.</b> {resolutionError}</span>
+          </section>
+        )}
 
         <section className="drift-section" id="queue" aria-labelledby="drift-title">
           <div className="drift-intro">
@@ -349,6 +422,11 @@ export default function App() {
               <Button kind="secondary" renderIcon={Document} onClick={openMemo}>
                 Draft escalation memo
               </Button>
+              {drifted && (
+                <a className="text-button" href={`?decision=${CURRENT_DECISION_ID}#top`}>
+                  Open the current recorded decision <ArrowRight size={15} />
+                </a>
+              )}
             </div>
           </article>
         </section>

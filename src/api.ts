@@ -113,6 +113,42 @@ export function compareDecision(decisionId: string): Promise<ComparisonPayload> 
   return request<ComparisonPayload>(`/api/decisions/${decisionId}/compare`);
 }
 
+export interface ResolutionItem {
+  rule_id: string;
+  kind: "CORRECT_KNOWN_FAILURE" | "ACQUIRE_MISSING_EVIDENCE";
+  instruction: string;
+  evidence_sources: Array<{
+    table_name: string;
+    canonical_query: string;
+    result_hash: string;
+    snapshot_id: string;
+  }>;
+  completion_condition: string;
+  status: "OPEN" | "COMPLETE" | "UNKNOWN";
+}
+
+export interface ResolutionPlanPayload {
+  decision_id: string;
+  snapshot_id: string;
+  policy_revision: string;
+  assessed_at: string;
+  items: ResolutionItem[];
+  all_complete: boolean;
+  record_unchanged: boolean;
+  next_action: string;
+}
+
+export function getResolutionPlan(decisionId: string): Promise<ResolutionPlanPayload> {
+  return request<ResolutionPlanPayload>(`/api/decisions/${decisionId}/resolution-plan`);
+}
+
+export function recheckResolutionPlan(decisionId: string): Promise<ResolutionPlanPayload> {
+  return request<ResolutionPlanPayload>(
+    `/api/decisions/${decisionId}/resolution-plan/recheck`,
+    { method: "POST" },
+  );
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", {
     day: "2-digit",
