@@ -46,7 +46,7 @@ const EFFECTIVE_AT = "2026-07-30T00:00:00Z";
 // The console opens on the decision taken before the corrections landed. Its
 // record says AVAILABLE; current evidence would now say HOLD. Showing a freshly
 // minted decision instead would pin to current data, and the record could never
-// disagree with the present — which is the one thing worth seeing.
+// disagree with the present. That is the one thing worth seeing.
 const DEMO_DECISION_ID = "D-1846";
 const CURRENT_DECISION_ID = "D-1847";
 const REQUESTED_DECISION_ID =
@@ -111,7 +111,7 @@ export default function App() {
       memo.body,
       "",
       `Decision ${memo.grounded_in.decision_id} · snapshot ${memo.grounded_in.snapshot_id} · policy ${memo.grounded_in.policy_revision}`,
-      "Draft — not sent.",
+      "Draft. Not sent.",
     ].join("\n");
     void copyText(text).then((ok) => {
       if (ok) {
@@ -145,7 +145,7 @@ export default function App() {
       .catch((error) => {
         if (REQUESTED_DECISION_ID !== DEMO_DECISION_ID) throw error;
         return (
-        // Not bootstrapped yet — record one against current evidence so the
+        // Not bootstrapped yet. Record one against current evidence so the
         // console still works on a fresh database.
         recordDecision({
           title_id: TITLE_ID,
@@ -247,6 +247,7 @@ export default function App() {
   const groups: EvidenceGroup[] = decision.evidence_groups;
   const gateTone = decision.outcome === "AVAILABLE" ? "green" : "red";
   const drifted = (comparison?.differences.length ?? 0) > 0;
+  const isHistoricalDecision = decision.decision_id === DEMO_DECISION_ID;
 
   return (
     <main className="shell with-agent">
@@ -284,10 +285,14 @@ export default function App() {
 
         <div className="page-head">
           <div>
-            <p className="eyebrow">Release gate</p>
-            <h1>North Star</h1>
+            <p className="eyebrow">North Star release decision</p>
+            <h1>
+              {isHistoricalDecision
+                ? "Correct then. Blocked now."
+                : "Blocked now. Here is the path back."}
+            </h1>
             <p className="subtitle">
-              Season 1 · Episode 6 · Nigeria · {formatDate(decision.effective_at)}
+              Season 1, Episode 6 in Nigeria. The {decision.outcome} record from {formatDate(decision.decided_at)} remains intact.
             </p>
           </div>
           <div className="head-actions">
@@ -295,6 +300,25 @@ export default function App() {
             <Button renderIcon={PlayFilledAlt} onClick={() => setShowReplay(true)}>Replay decision</Button>
           </div>
         </div>
+
+        {drifted && comparison && (
+          <section className="truth-pair" aria-label="Recorded and current release states">
+            <article>
+              <span>Recorded on {formatDate(comparison.historical.decided_at)}</span>
+              <strong className="available-state">{comparison.historical.outcome}</strong>
+              <small>Evidence snapshot {comparison.historical.snapshot_id}</small>
+            </article>
+            <div className="truth-bridge">
+              <b>Both are true.</b>
+              <span>The historical record was not rewritten.</span>
+            </div>
+            <article>
+              <span>Current evidence</span>
+              <strong className="hold-state">{comparison.current.outcome}</strong>
+              <small>{comparison.current.blocking_condition}</small>
+            </article>
+          </section>
+        )}
 
         <section className="decision-hero" aria-labelledby="decision-title">
           <div className="decision-rule" />
@@ -556,7 +580,7 @@ export default function App() {
             <div className="verification-state warning">
               <ErrorFilled size={20} />
               <span>
-                <b>Not certified — {verification.failed_requirement}.</b> {verification.detail}
+                <b>Not certified: {verification.failed_requirement}.</b> {verification.detail}
               </span>
             </div>
           )}
@@ -627,7 +651,7 @@ export default function App() {
               <div className="verification-state success">
                 <CheckmarkFilled size={20} />
                 <span>
-                  <b>With the binding — {ablation.with_binding.capability_class}.</b>{" "}
+                  <b>With the binding: {ablation.with_binding.capability_class}.</b>{" "}
                   {ablation.with_binding.detail}
                 </span>
               </div>
@@ -635,7 +659,7 @@ export default function App() {
                 <ErrorFilled size={20} />
                 <span>
                   <b>
-                    Without it — {ablation.without_binding.capability_class}
+                    Without it: {ablation.without_binding.capability_class}
                     {ablation.without_binding.failed_requirement
                       ? ` (${ablation.without_binding.failed_requirement})`
                       : ""}.
@@ -651,7 +675,7 @@ export default function App() {
 
       <Modal
         open={showMemo}
-        modalHeading="Clearance escalation memo — draft"
+        modalHeading="Clearance escalation memo: draft"
         primaryButtonText={memoCopied ? "Copied" : "Copy draft"}
         secondaryButtonText="Close"
         primaryButtonDisabled={!memo}
@@ -675,7 +699,7 @@ export default function App() {
                 <span>
                   Grounded in decision {memo.grounded_in.decision_id}, snapshot{" "}
                   {memo.grounded_in.snapshot_id}, and policy{" "}
-                  {memo.grounded_in.policy_revision}. This is a draft — sending it
+                  {memo.grounded_in.policy_revision}. This is a draft. Sending it
                   is a human action.
                 </span>
               </div>

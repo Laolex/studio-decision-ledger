@@ -4,7 +4,7 @@
 // that came back, and the model's words. That order is the point. An answer on
 // its own would leave a reader unable to tell whether the outcome came from the
 // deterministic evaluator or from the model, which is the impression the
-// read-only design exists to prevent — so the gate is labelled as the
+// read-only design exists to prevent. The gate is therefore labelled as the
 // evaluator's and the paragraph is labelled as an explanation.
 //
 // The panel is docked to the right of the shell so it stays reachable from
