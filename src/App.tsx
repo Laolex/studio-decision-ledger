@@ -18,6 +18,7 @@ import {
 import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 
 import AgentPanel from "./AgentPanel";
+import DecisionDiffTable from "./DecisionDiffTable";
 import {
   ablateDecision,
   compareDecision,
@@ -614,6 +615,7 @@ export default function App() {
                 {comparison.current.max_revision} and would produce{" "}
                 <b>{comparison.current.outcome}</b> for the same date.
               </p>
+              <DecisionDiffTable comparison={comparison} />
               {comparison.differences.map((difference) => (
                 <div className="verification-state warning" key={difference}>
                   <WarningFilled size={20} />
