@@ -36,6 +36,12 @@ class FakeClient:
         self.models = FakeModels(response, error)
 
 
+class StatusError(RuntimeError):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"request failed with {status_code}")
+        self.status_code = status_code
+
+
 def test_returns_the_models_text():
     client = FakeClient(FakeResponse("The music clearance expired on 31 July."))
     model = GeminiRationaleModel(client=client, model="gemini-2.5-flash")
@@ -80,6 +86,51 @@ def test_a_failing_model_raises_so_the_seam_can_absorb_it():
     model = GeminiRationaleModel(client=FakeClient(error=RuntimeError("503")),
                                  model="m")
     with pytest.raises(RuntimeError):
+        model.explain("p")
+
+
+def test_retryable_capacity_error_moves_to_an_independent_location(monkeypatch):
+    monkeypatch.setenv("GEMINI_LOCATION", "global")
+    primary = FakeClient(error=StatusError(429))
+    clients = {
+        "europe-west2": FakeClient(FakeResponse("served regionally")),
+        "asia-southeast1": FakeClient(FakeResponse("not reached")),
+    }
+    requested: list[str] = []
+
+    def client_for(location: str):
+        requested.append(location)
+        return clients[location]
+
+    model = GeminiRationaleModel(
+        primary,
+        model="m",
+        fallback_client_factory=client_for,
+    )
+
+    assert model.explain("p") == "served regionally"
+    assert requested == ["europe-west2"]
+
+
+def test_non_retryable_model_error_never_changes_location(monkeypatch):
+    monkeypatch.setenv("GEMINI_LOCATION", "global")
+    requested: list[str] = []
+    model = GeminiRationaleModel(
+        FakeClient(error=StatusError(400)),
+        model="m",
+        fallback_client_factory=lambda location: requested.append(location),
+    )
+
+    with pytest.raises(StatusError):
+        model.explain("p")
+    assert requested == []
+
+
+def test_injected_test_client_never_constructs_a_live_fallback(monkeypatch):
+    monkeypatch.setenv("GEMINI_LOCATION", "global")
+    model = GeminiRationaleModel(FakeClient(error=StatusError(429)), model="m")
+
+    with pytest.raises(StatusError):
         model.explain("p")
 
 

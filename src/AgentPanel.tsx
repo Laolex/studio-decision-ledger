@@ -10,7 +10,7 @@
 // The panel is docked to the right of the shell so it stays reachable from
 // every part of the page rather than only where it happens to sit.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Chat, DataBase, WarningFilled } from "@carbon/icons-react";
 import { Button, InlineLoading } from "@carbon/react";
 
@@ -94,6 +94,17 @@ export default function AgentPanel() {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+
+  // Keep the latest turn in view without hijacking a reader who scrolled up.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || turns.length === 0) return;
+    if (followLatestRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [turns, pending]);
 
   async function submit(asked: string) {
     const text = asked.trim();
@@ -122,9 +133,20 @@ export default function AgentPanel() {
         </div>
       </header>
 
-      <div className="agent-body">
+      <div
+        className="agent-body"
+        ref={bodyRef}
+        aria-live="polite"
+        aria-busy={pending}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          followLatestRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        }}
+      >
         {turns.length === 0 && !pending && (
           <div className="agent-empty">
+            <p className="agent-empty-hint">Try one of these — the gate comes from bound evidence, not model prose.</p>
             {SUGGESTIONS.map((suggestion) => (
               <button
                 key={suggestion}
@@ -156,8 +178,13 @@ export default function AgentPanel() {
           </article>
         ))}
 
-        {pending && <InlineLoading description="Asking the agent…" />}
-        {error && <p className="agent-error">{error}</p>}
+        {pending && (
+          <div className="agent-pending">
+            <InlineLoading description="Asking the agent — reading bound evidence…" />
+            <span className="agent-pending-note">The agent cannot write a decision; the evaluator returns the gate.</span>
+          </div>
+        )}
+        {error && <p className="agent-error" role="alert">{error}</p>}
       </div>
 
       <form
@@ -172,6 +199,7 @@ export default function AgentPanel() {
           onChange={(changeEvent) => setQuestion(changeEvent.target.value)}
           placeholder="Ask about a title, territory and date"
           aria-label="Ask the agent a question"
+          disabled={pending}
         />
         <Button
           type="submit"

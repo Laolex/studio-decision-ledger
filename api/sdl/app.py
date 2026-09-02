@@ -127,7 +127,10 @@ def get_rationale_model():
     to decide.
     """
     try:
-        return GeminiRationaleModel(vertex_client())
+        return GeminiRationaleModel(
+            vertex_client(),
+            fallback_client_factory=lambda location: vertex_client(location=location),
+        )
     except Exception:
         logger.warning("rationale model unavailable; decisions will record without one",
                        exc_info=True)
@@ -172,6 +175,7 @@ def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
         "source_manifest_hash": snapshot.source_manifest_hash,
         "max_revision": snapshot.max_revision,
         "retrieval_count": len(snapshot.facts),
+        "evidence_bindings": list(snapshot.facts),
         "model_rationale": record.model_rationale,
         "evidence_groups": evidence_groups(facts, decision, record.policy_revision),
     }
