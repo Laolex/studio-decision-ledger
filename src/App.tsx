@@ -460,6 +460,28 @@ export default function App() {
           <div><p className="eyebrow">Bound evidence</p><h2>Everything used to make this decision</h2></div>
           <span className="snapshot-chip"><Locked size={14} /> Snapshot {decision.snapshot_id}</span>
         </div>
+        <details className="binding-receipt">
+          <summary>
+            Inspect the evidence receipt · {decision.evidence_bindings.length} hashed retrievals
+          </summary>
+          <div className="binding-list">
+            {decision.evidence_bindings.map((binding) => (
+              <article className="binding-row" key={binding.table_name}>
+                <div>
+                  <b>{binding.table_name}</b>
+                  <span>{binding.row_count} rows · pinned through revision {binding.max_revision}</span>
+                </div>
+                <button
+                  title={binding.result_hash}
+                  onClick={() => void copyText(binding.result_hash)}
+                >
+                  {binding.result_hash} <Copy size={13} />
+                </button>
+                <code>{binding.canonical_query}</code>
+              </article>
+            ))}
+          </div>
+        </details>
 
         <section className="evidence-grid" id="evidence" aria-label="Decision evidence">
           {groups.map((group) => (

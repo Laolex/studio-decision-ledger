@@ -31,6 +31,13 @@ export interface DecisionPayload {
   source_manifest_hash: string;
   max_revision: number;
   retrieval_count: number;
+  evidence_bindings: Array<{
+    table_name: string;
+    canonical_query: string;
+    result_hash: string;
+    row_count: number;
+    max_revision: number;
+  }>;
   model_rationale: string;
   evidence_groups: EvidenceGroup[];
 }

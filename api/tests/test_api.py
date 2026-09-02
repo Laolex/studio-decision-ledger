@@ -45,6 +45,11 @@ def test_recording_a_decision_returns_the_outcome_and_a_binding(client):
     assert body["decision_id"].startswith("D-")
     assert body["snapshot_id"].startswith("RS-")
     assert body["policy_revision"] == "POL-2026.08"
+    assert len(body["evidence_bindings"]) == body["retrieval_count"]
+    for binding in body["evidence_bindings"]:
+        assert binding["table_name"]
+        assert len(binding["result_hash"]) == 64
+        assert binding["canonical_query"].startswith("SELECT")
 
 
 def test_a_decision_made_now_sees_the_backdated_correction(client):
