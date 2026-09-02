@@ -469,7 +469,9 @@ export default function App() {
               <article className="binding-row" key={binding.table_name}>
                 <div>
                   <b>{binding.table_name}</b>
-                  <span>{binding.row_count} rows · pinned through revision {binding.max_revision}</span>
+                  <span>
+                    {binding.row_count} {binding.row_count === 1 ? "row" : "rows"} · pinned through revision {binding.max_revision}
+                  </span>
                 </div>
                 <button
                   title={binding.result_hash}
