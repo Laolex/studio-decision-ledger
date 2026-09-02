@@ -89,6 +89,35 @@ def test_a_recorded_decision_can_be_fetched_again(client):
     assert fetched.json()["snapshot_id"] == created["snapshot_id"]
 
 
+def test_integrity_probe_serially_rehashes_every_bound_retrieval(client):
+    created = make_decision(client)
+
+    response = client.post(
+        f"/api/decisions/{created['decision_id']}/integrity-probe"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    rehash = body["serial_canonical_rehash"]
+    assert rehash["status"] == "VERIFIED"
+    assert rehash["checked"] == created["retrieval_count"]
+    assert rehash["matched"] == created["retrieval_count"]
+    assert all(check["matched"] for check in rehash["checks"])
+    assert body["service_revision"] == "local"
+    assert body["worker"]["package"] == "mcp-clickhouse"
+    assert body["worker"]["pool_size"] == 1
+    assert body["pool_wait"] == {
+        "samples": created["retrieval_count"],
+        "total_ms": 0.0,
+        "max_ms": 0.0,
+    }
+
+
+def test_integrity_probe_for_unknown_decision_returns_404(client):
+    response = client.post("/api/decisions/D-NOPE/integrity-probe")
+    assert response.status_code == 404
+
+
 def test_unknown_decision_returns_404(client):
     assert client.get("/api/decisions/D-NOPE").status_code == 404
 

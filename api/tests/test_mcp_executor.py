@@ -11,7 +11,7 @@ other would fail to certify.
 from datetime import datetime, timezone
 
 from sdl.evaluator import evaluate, ReleaseRequest
-from sdl.mcp_executor import ClickHouseMCPExecutor
+from sdl.mcp_executor import ClickHouseMCPExecutor, ClickHouseMCPWorkerPool
 from sdl.resolve import EVIDENCE_TABLES, resolve_facts
 from sdl.retrieval import point_in_time_query
 
@@ -35,6 +35,45 @@ POLICY = {
         {"id": "ESC-001", "outcome_when_unmet": "ESCALATE"},
     ],
 }
+
+
+class FakeWorker:
+    created = []
+
+    def __init__(self, env, server_command=None):
+        self.index = len(self.created)
+        self.closed = False
+        self.created.append(self)
+
+    def __enter__(self):
+        return lambda sql: [{"worker": self.index, "query": sql}]
+
+    def __exit__(self, exc_type, exc, tb):
+        self.closed = True
+
+
+def test_worker_pool_has_a_real_bounded_lease_boundary():
+    FakeWorker.created = []
+    with ClickHouseMCPWorkerPool(
+        {}, size=2, worker_factory=FakeWorker
+    ) as pool:
+        rows, measurement = pool.execute_measured("SELECT 1")
+
+        assert pool.size == 2
+        assert rows == [{"worker": 0, "query": "SELECT 1"}]
+        assert measurement.worker_index == 0
+        assert measurement.pool_wait_ms >= 0
+        assert measurement.query_ms >= 0
+
+    assert len(FakeWorker.created) == 2
+    assert all(worker.closed for worker in FakeWorker.created)
+
+
+def test_worker_pool_rejects_a_zero_size():
+    import pytest
+
+    with pytest.raises(ValueError, match="at least one"):
+        ClickHouseMCPWorkerPool({}, size=0)
 
 
 def test_mcp_rows_are_identical_to_direct_query_rows(clickhouse_env, http_executor):
