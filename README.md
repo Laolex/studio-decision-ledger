@@ -14,6 +14,11 @@ underlying data changes without rewriting history.
 
 Built for the Agentic Cinema hackathon, **ClickHouse track**.
 
+**Current production release:** application commit/image `0601fb0`, Cloud Run
+revision `sdl-00020-ghc`. The release passed 163 backend tests against ClickHouse, the
+six-check production pre-flight, the five-arm negative control, and browser
+inspection of the deployed console. No schema migration was required.
+
 ## The problem
 
 When a title gets pulled in a territory, nobody can reconstruct why six weeks
@@ -35,6 +40,11 @@ the moment of deciding*, and can prove it.
 - **Evidence is pinned, not referenced.** Each decision binds a snapshot that
   fixes a maximum data revision, plus the canonical query text and a hash of
   every result that fed the outcome.
+- **The receipt can test the current serving path.** An on-demand integrity
+  probe identifies the exact Cloud Run revision and installed MCP worker build,
+  measures checkout wait from a bounded two-worker pool, then reruns every
+  stored canonical query serially and compares the new hashes with the receipt.
+  These are labelled as live diagnostics, never historical decision evidence.
 - **The verifier refuses what it cannot support.** Replay returns a capability
   class — never a confidence percentage. If the snapshot, policy, or a result
   hash is missing or mismatched, it reports `NOT_CERTIFIED` and names the first
@@ -66,7 +76,7 @@ make its point would be the exact failure it exists to warn about.
 ### An observed production run
 
 One operator sentence, two tools, one handoff. Captured from the deployed
-service on **2026-08-17**, Cloud Run revision **`sdl-00010-vnk`**, agent running
+service on **2026-08-17**, Cloud Run revision **`sdl-00010-vnk`**, with the agent running
 natively on Vertex AI Agent Engine. The full machine-readable capture is at
 [`examples/production-transcript.json`](examples/production-transcript.json);
 the decisive lines are below.
@@ -106,6 +116,45 @@ otherwise, because nothing the agent can reach takes a writer. `sent: false` —
 the memo is a draft; sending it, approving an exception and lifting a hold
 remain human actions in the console. The historical `AVAILABLE` and the current
 `HOLD` are both true at once, and neither is allowed to overwrite the other.
+
+### The live integrity probe
+
+Open **Inspect the evidence receipt** in the console and press **Run live
+integrity probe**, or call the same read-only path directly:
+
+```bash
+curl -s -X POST \
+  https://sdl-ntvbh3dlvq-uc.a.run.app/api/decisions/D-1846/integrity-probe
+```
+
+The promoted release reports its actual runtime identity and recomputes each
+binding rather than printing a predetermined green state. A verified response
+has this shape; timing values vary by request:
+
+```json
+{
+  "service_revision": "sdl-00020-ghc",
+  "worker": {
+    "package": "mcp-clickhouse",
+    "version": "0.5.0",
+    "pool_size": 2
+  },
+  "pool_wait": {
+    "samples": 5,
+    "max_ms": 0.02
+  },
+  "serial_canonical_rehash": {
+    "status": "VERIFIED",
+    "checked": 5,
+    "matched": 5
+  }
+}
+```
+
+`pool_wait` measures time waiting to lease an MCP worker, separately from query
+execution. `VERIFIED` means every newly computed result hash matched the hash
+stored in the named evidence snapshot. A source error or mismatch produces a
+different status; the probe does not edit the decision or its snapshot.
 
 ### The negative control, and the result that does not flatter us
 
@@ -161,9 +210,11 @@ Both required integrations are load-bearing, not decorative:
   path below does not depend on either of them, by design: the model operates and
   explains the workflow; it never determines the release gate.
 - **ClickHouse MCP server** — every decision-relevant fact is retrieved through
-  the ClickHouse MCP server at runtime. The canonical query text and result
-  hash from each MCP interaction are written into the decision record. There is
-  no direct-driver bypass path in the decision flow.
+  a bounded pool of two long-lived ClickHouse MCP workers at runtime. The
+  canonical query text and result hash from each interaction are stored in the
+  immutable evidence snapshot named by the decision. There is no direct-driver
+  bypass path in the decision flow. Pool checkout wait is measured at the lease
+  boundary rather than inferred from query duration.
 
 ## Data model
 
@@ -206,7 +257,7 @@ correction would now produce `HOLD` — without touching the original record.
 db/schema.sql   ClickHouse schema, bitemporal, append-only
 db/seed.py      deterministic synthetic-data generator -> db/seed.sql
 db/apply.py     apply a .sql file over the ClickHouse HTTPS interface
-api/sdl/        decision service: evaluator, retrieval, resolution, MCP client
+api/sdl/        decision service: evaluator, retrieval, resolution, MCP worker pool
 api/tests/      tests, run against a real ClickHouse service
 src/            React + Vite web console
 ```
@@ -269,14 +320,18 @@ Honest state of the build:
 - [x] Bitemporal ClickHouse schema
 - [x] Deterministic synthetic dataset generator
 - [x] Web console — wired to the live API (no mocked data)
-- [x] Deterministic policy evaluator (11 tests)
-- [x] ClickHouse MCP retrieval and query-evidence capture (25 tests)
-- [x] Gemini rationale model on Vertex AI, behind the model seam (7 tests)
+- [x] Deterministic policy evaluator
+- [x] ClickHouse MCP retrieval and query-evidence capture
+- [x] Bounded two-worker MCP pool with measured checkout wait
+- [x] Live serial canonical re-hash probe with explicit mismatch/source-error states
+- [x] Expanded evidence receipt with canonical queries and full result hashes
+- [x] Gemini rationale model on Vertex AI, behind the model seam
 - [x] ADK agent on Vertex AI Agent Engine — three read-only tools, transcript shown in the console
 - [x] Decision-record write path
-- [x] Replay verifier (39 tests)
+- [x] Replay verifier and offline five-arm negative control
 - [x] Current-vs-historical comparison surface
 - [x] Hosted deployment — Cloud Run, console and API on one origin
+- [x] Release verification — 163 backend tests, six live pre-flight checks, production browser inspection
 
 ## Licence
 
