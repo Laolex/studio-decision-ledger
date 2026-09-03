@@ -96,6 +96,43 @@ export function getDecision(decisionId: string): Promise<DecisionPayload> {
   return request<DecisionPayload>(`/api/decisions/${decisionId}`);
 }
 
+export interface IntegrityProbePayload {
+  decision_id: string;
+  service_revision: string;
+  worker: {
+    package: string;
+    version: string;
+    pool_size: number;
+  };
+  pool_wait: {
+    samples: number;
+    total_ms: number;
+    max_ms: number;
+  };
+  query_time: {
+    total_ms: number;
+  };
+  serial_canonical_rehash: {
+    status: "VERIFIED" | "MISMATCH" | "SOURCE_ERROR";
+    checked: number;
+    matched: number;
+    checks: Array<{
+      table_name: string;
+      expected_hash: string;
+      observed_hash: string;
+      matched: boolean;
+      error: string;
+    }>;
+  };
+}
+
+export function runIntegrityProbe(decisionId: string): Promise<IntegrityProbePayload> {
+  return request<IntegrityProbePayload>(
+    `/api/decisions/${decisionId}/integrity-probe`,
+    { method: "POST" },
+  );
+}
+
 export function verifyDecision(decisionId: string): Promise<VerificationPayload> {
   return request<VerificationPayload>(`/api/decisions/${decisionId}/verify`, {
     method: "POST",

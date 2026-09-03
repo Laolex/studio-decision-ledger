@@ -13,10 +13,14 @@ of server startup on every retrieval.
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import os
+import queue
 import threading
+import time
 from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -30,6 +34,23 @@ QUERY_TOOL = "run_query"
 
 class MCPQueryError(RuntimeError):
     """The MCP server reported a failure for a query."""
+
+
+@dataclass(frozen=True)
+class QueryMeasurement:
+    """Runtime measurements for one checked-out MCP worker."""
+
+    pool_wait_ms: float
+    query_ms: float
+    worker_index: int
+
+
+def worker_package_version() -> str:
+    """Return the installed worker build, never an invented revision."""
+    try:
+        return importlib.metadata.version("mcp-clickhouse")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def _rows_from_payload(payload: dict[str, Any]) -> list[dict]:
@@ -125,3 +146,76 @@ class ClickHouseMCPExecutor:
             raise RuntimeError("executor is not running")
         future: Future = asyncio.run_coroutine_threadsafe(self._call(sql), self._loop)
         return future.result(timeout=120)
+
+
+class ClickHouseMCPWorkerPool:
+    """A bounded pool of long-lived ClickHouse MCP subprocess workers.
+
+    Queue wait is measured at the lease boundary. It is therefore pool
+    contention, not query duration relabelled as "pool latency".
+    """
+
+    def __init__(
+        self,
+        env: dict[str, str],
+        *,
+        size: int = 2,
+        server_command: str | None = None,
+        worker_factory=ClickHouseMCPExecutor,
+    ):
+        if size < 1:
+            raise ValueError("worker pool size must be at least one")
+        self.size = size
+        self._env = env
+        self._server_command = server_command
+        self._worker_factory = worker_factory
+        self._workers: list[ClickHouseMCPExecutor] = []
+        self._available: queue.Queue[tuple[int, Any]] = queue.Queue(maxsize=size)
+
+    def __enter__(self):
+        try:
+            for index in range(self.size):
+                worker = self._worker_factory(
+                    self._env, server_command=self._server_command
+                )
+                execute = worker.__enter__()
+                self._workers.append(worker)
+                self._available.put_nowait((index, execute))
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        while not self._available.empty():
+            try:
+                self._available.get_nowait()
+            except queue.Empty:
+                break
+        for worker in reversed(self._workers):
+            worker.__exit__(exc_type, exc, tb)
+        self._workers.clear()
+        return False
+
+    def execute_measured(self, sql: str) -> tuple[list[dict], QueryMeasurement]:
+        wait_started = time.perf_counter()
+        try:
+            worker_index, execute = self._available.get(timeout=120)
+        except queue.Empty as error:
+            raise TimeoutError("no ClickHouse MCP worker became available") from error
+        wait_ms = (time.perf_counter() - wait_started) * 1000
+        query_started = time.perf_counter()
+        try:
+            rows = execute(sql)
+        finally:
+            self._available.put((worker_index, execute))
+        query_ms = (time.perf_counter() - query_started) * 1000
+        return rows, QueryMeasurement(
+            pool_wait_ms=wait_ms,
+            query_ms=query_ms,
+            worker_index=worker_index,
+        )
+
+    def __call__(self, sql: str) -> list[dict]:
+        rows, _measurement = self.execute_measured(sql)
+        return rows

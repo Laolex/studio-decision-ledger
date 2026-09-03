@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 import urllib.request
 from base64 import b64encode
 from datetime import datetime, timezone
@@ -24,9 +26,9 @@ from pydantic import BaseModel, Field
 from sdl.canonical import canonical_rows
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import read_decision, read_policy, read_snapshot
-from sdl.mcp_executor import MCPQueryError
-from sdl.mcp_executor import ClickHouseMCPExecutor
-from sdl.resolve import resolve_facts
+from sdl.mcp_executor import ClickHouseMCPWorkerPool, MCPQueryError, QueryMeasurement
+from sdl.mcp_executor import worker_package_version
+from sdl.resolve import canonical_result_hash, resolve_facts
 from sdl.agent_proxy import VertexAgentEngine
 from sdl.gemini import GeminiRationaleModel, vertex_client
 from sdl.memo import draft_memo
@@ -84,16 +86,20 @@ def _http_call(env: dict[str, str], sql: str, want_rows: bool) -> list[dict]:
     return canonical_rows([json.loads(line) for line in text.splitlines() if line])
 
 
-_mcp_executor: ClickHouseMCPExecutor | None = None
+_mcp_executor: ClickHouseMCPWorkerPool | None = None
 _mcp_call = None
+_mcp_init_lock = threading.Lock()
 
 
 def get_executor():
-    """Production retrieval path: the ClickHouse MCP server."""
+    """Production retrieval path: a bounded pool of ClickHouse MCP workers."""
     global _mcp_executor, _mcp_call
     if _mcp_call is None:
-        _mcp_executor = ClickHouseMCPExecutor(load_env())
-        _mcp_call = _mcp_executor.__enter__()
+        with _mcp_init_lock:
+            if _mcp_call is None:
+                size = int(os.getenv("SDL_MCP_WORKER_POOL_SIZE", "2"))
+                _mcp_executor = ClickHouseMCPWorkerPool(load_env(), size=size)
+                _mcp_call = _mcp_executor.__enter__()
     return _mcp_call
 
 
@@ -178,6 +184,80 @@ def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
         "evidence_bindings": list(snapshot.facts),
         "model_rationale": record.model_rationale,
         "evidence_groups": evidence_groups(facts, decision, record.policy_revision),
+    }
+
+
+def _measured_execute(executor, sql: str) -> tuple[list[dict], QueryMeasurement]:
+    """Use pool telemetry in production and an honest zero-wait seam in tests."""
+    measured = getattr(executor, "execute_measured", None)
+    if measured is not None:
+        return measured(sql)
+    started = time.perf_counter()
+    rows = executor(sql)
+    return rows, QueryMeasurement(
+        pool_wait_ms=0.0,
+        query_ms=(time.perf_counter() - started) * 1000,
+        worker_index=0,
+    )
+
+
+def _runtime_integrity_probe(executor, record, snapshot) -> dict:
+    """Re-read every bound result serially and report measured runtime facts."""
+    checks = []
+    measurements = []
+    for fact in snapshot.facts:
+        try:
+            rows, measurement = _measured_execute(executor, fact["canonical_query"])
+            observed_hash = canonical_result_hash(rows)
+            matched = observed_hash == fact["result_hash"]
+            error = ""
+            measurements.append(measurement)
+        except Exception as exc:
+            observed_hash = ""
+            matched = False
+            error = f"{type(exc).__name__}: {exc}"
+        checks.append(
+            {
+                "table_name": fact["table_name"],
+                "expected_hash": fact["result_hash"],
+                "observed_hash": observed_hash,
+                "matched": matched,
+                "error": error,
+            }
+        )
+
+    matched_count = sum(1 for check in checks if check["matched"])
+    if any(check["error"] for check in checks):
+        status = "SOURCE_ERROR"
+    elif matched_count == len(checks):
+        status = "VERIFIED"
+    else:
+        status = "MISMATCH"
+
+    waits = [measurement.pool_wait_ms for measurement in measurements]
+    query_times = [measurement.query_ms for measurement in measurements]
+    return {
+        "decision_id": record.decision_id,
+        "service_revision": os.getenv("K_REVISION", "local"),
+        "worker": {
+            "package": "mcp-clickhouse",
+            "version": worker_package_version(),
+            "pool_size": int(getattr(executor, "size", 1)),
+        },
+        "pool_wait": {
+            "samples": len(waits),
+            "total_ms": round(sum(waits), 3),
+            "max_ms": round(max(waits, default=0.0), 3),
+        },
+        "query_time": {
+            "total_ms": round(sum(query_times), 3),
+        },
+        "serial_canonical_rehash": {
+            "status": status,
+            "checked": len(checks),
+            "matched": matched_count,
+            "checks": checks,
+        },
     }
 
 
@@ -292,6 +372,22 @@ def create_app() -> FastAPI:
         )
         decision = Decision(outcome=record.outcome, rule_hits=list(record.rule_hits))
         return _decision_payload(record, snapshot, decision, facts)
+
+    @app.post("/api/decisions/{decision_id}/integrity-probe")
+    def probe_decision_integrity(
+        decision_id: str, executor=Depends(get_executor)
+    ) -> dict:
+        """Measure the current serving path without rewriting the record."""
+        record = read_decision(executor, decision_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"no decision {decision_id}")
+        snapshot = read_snapshot(executor, record.snapshot_id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"decision {decision_id} names a snapshot that is unavailable",
+            )
+        return _runtime_integrity_probe(executor, record, snapshot)
 
     @app.post("/api/decisions/{decision_id}/verify")
     def verify_decision(decision_id: str, executor=Depends(get_executor)) -> dict:

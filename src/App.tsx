@@ -29,11 +29,13 @@ import {
   getResolutionPlan,
   recordDecision,
   recheckResolutionPlan,
+  runIntegrityProbe,
   verifyDecision,
   type AblationPayload,
   type ComparisonPayload,
   type DecisionPayload,
   type EvidenceGroup,
+  type IntegrityProbePayload,
   type MemoPayload,
   type ResolutionPlanPayload,
   type Tone,
@@ -139,6 +141,19 @@ export default function App() {
 
   const [showAblation, setShowAblation] = useState(false);
   const [ablation, setAblation] = useState<AblationPayload | null>(null);
+  const [integrityProbe, setIntegrityProbe] = useState<IntegrityProbePayload | null>(null);
+  const [probingIntegrity, setProbingIntegrity] = useState(false);
+  const [integrityError, setIntegrityError] = useState("");
+
+  const probeIntegrity = useCallback(() => {
+    if (!decision || probingIntegrity) return;
+    setProbingIntegrity(true);
+    setIntegrityError("");
+    runIntegrityProbe(decision.decision_id)
+      .then(setIntegrityProbe)
+      .catch((error) => setIntegrityError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setProbingIntegrity(false));
+  }, [decision, probingIntegrity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -482,6 +497,52 @@ export default function App() {
                 <code>{binding.canonical_query}</code>
               </article>
             ))}
+          </div>
+          <div className="integrity-probe">
+            <div>
+              <b>Live serving diagnostics</b>
+              <span>
+                Re-read the stored queries through the current MCP worker pool. This checks
+                today&apos;s serving path; it does not alter the historical record.
+              </span>
+            </div>
+            <Button
+              kind="tertiary"
+              size="sm"
+              disabled={probingIntegrity}
+              onClick={probeIntegrity}
+            >
+              {probingIntegrity ? "Running probe…" : "Run live integrity probe"}
+            </Button>
+            {probingIntegrity && (
+              <InlineLoading description="Serially re-hashing stored retrievals" />
+            )}
+            {integrityError && <p className="integrity-error">{integrityError}</p>}
+            {integrityProbe && (
+              <div className="integrity-results" aria-live="polite">
+                <div>
+                  <span>Worker revision</span>
+                  <b>{integrityProbe.service_revision}</b>
+                  <small>
+                    {integrityProbe.worker.package} {integrityProbe.worker.version} · {integrityProbe.worker.pool_size} workers
+                  </small>
+                </div>
+                <div>
+                  <span>Worker pool wait</span>
+                  <b>{integrityProbe.pool_wait.max_ms.toFixed(3)} ms max</b>
+                  <small>{integrityProbe.pool_wait.samples} measured checkouts</small>
+                </div>
+                <div>
+                  <span>Serial canonical re-hash</span>
+                  <b className={integrityProbe.serial_canonical_rehash.status === "VERIFIED" ? "probe-ok" : "probe-failed"}>
+                    {integrityProbe.serial_canonical_rehash.status}
+                  </b>
+                  <small>
+                    {integrityProbe.serial_canonical_rehash.matched}/{integrityProbe.serial_canonical_rehash.checked} stored hashes matched
+                  </small>
+                </div>
+              </div>
+            )}
           </div>
         </details>
 
