@@ -19,15 +19,16 @@ import { Button, InlineLoading, Modal, Tag } from "@carbon/react";
 
 import AgentPanel from "./AgentPanel";
 import DecisionDiffTable from "./DecisionDiffTable";
+import ReleaseWorkbench from "./ReleaseWorkbench";
 import {
   ablateDecision,
   compareDecision,
   copyText,
   draftMemo,
   formatDate,
+  formatReleaseInstant,
   getDecision,
   getResolutionPlan,
-  recordDecision,
   recheckResolutionPlan,
   runIntegrityProbe,
   verifyDecision,
@@ -42,16 +43,11 @@ import {
   type VerificationPayload,
 } from "./api";
 
-const TITLE_ID = "NORTHSTAR-S01E06";
-const TERRITORY = "NG";
-const EFFECTIVE_AT = "2026-07-30T00:00:00Z";
-
 // The console opens on the decision taken before the corrections landed. Its
 // record says AVAILABLE; current evidence would now say HOLD. Showing a freshly
 // minted decision instead would pin to current data, and the record could never
 // disagree with the present. That is the one thing worth seeing.
 const DEMO_DECISION_ID = "D-1846";
-const CURRENT_DECISION_ID = "D-1847";
 const REQUESTED_DECISION_ID =
   new URLSearchParams(window.location.search).get("decision") || DEMO_DECISION_ID;
 
@@ -158,18 +154,6 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     getDecision(REQUESTED_DECISION_ID)
-      .catch((error) => {
-        if (REQUESTED_DECISION_ID !== DEMO_DECISION_ID) throw error;
-        return (
-        // Not bootstrapped yet. Record one against current evidence so the
-        // console still works on a fresh database.
-        recordDecision({
-          title_id: TITLE_ID,
-          territory_code: TERRITORY,
-          effective_at: EFFECTIVE_AT,
-        })
-        );
-      })
       .then((payload) => {
         if (!cancelled) setDecision(payload);
       })
@@ -237,6 +221,7 @@ export default function App() {
               <p className="subtitle">{loadError}</p>
             </div>
           </div>
+          <ReleaseWorkbench />
         </section>
       </main>
     );
@@ -274,7 +259,7 @@ export default function App() {
         </a>
 
         <nav className="nav-list">
-          <a href="#queue">Decision queue</a>
+          <a href="#workbench" onClick={() => { const panel = document.querySelector<HTMLDetailsElement>("#workbench"); if (panel) panel.open = true; }}>Release workbench</a>
           <a className="active" href="#top" aria-current="page">Release readiness</a>
           <a href="#records">Decision records</a>
           <a href="#evidence">Evidence sources</a>
@@ -284,7 +269,7 @@ export default function App() {
           <a href="#settings" className="settings-link"><Settings size={16} /> Workspace settings</a>
           <div className="workspace-switcher">
             <span className="workspace-avatar">NS</span>
-            <span><b>North Star</b><small>Production workspace</small></span>
+            <span><b>Public catalogue</b><small>Synthetic evidence</small></span>
             <ChevronDown size={16} aria-hidden="true" />
           </div>
         </div>
@@ -292,7 +277,7 @@ export default function App() {
 
       <section className="content" id="top">
         <header className="topbar">
-          <div className="crumbs"><span>North Star</span><ArrowRight size={14} /><span>Release readiness</span></div>
+          <div className="crumbs"><span>{decision.title_id}</span><ArrowRight size={14} /><span>Release readiness</span></div>
           <div className="topbar-actions">
             <button className="icon-button" aria-label="Search decisions"><Search size={18} /></button>
             <button className="avatar-button" aria-label="Account menu">LO</button>
@@ -301,14 +286,14 @@ export default function App() {
 
         <div className="page-head">
           <div>
-            <p className="eyebrow">North Star release decision</p>
+            <p className="eyebrow">Release decision</p>
             <h1>
               {isHistoricalDecision
                 ? "Correct then. Blocked now."
-                : "Blocked now. Here is the path back."}
+              : outcomeHeadline(decision.outcome)}
             </h1>
             <p className="subtitle">
-              Season 1, Episode 6 in Nigeria. The {decision.outcome} record from {formatDate(decision.decided_at)} remains intact.
+              {decision.title_id} · {decision.territory_code} · release {formatReleaseInstant(decision.effective_at)}. The {decision.outcome} record from {formatDate(decision.decided_at)} remains intact.
             </p>
           </div>
           <div className="head-actions">
@@ -316,6 +301,9 @@ export default function App() {
             <Button renderIcon={PlayFilledAlt} onClick={() => setShowReplay(true)}>Replay decision</Button>
           </div>
         </div>
+
+        <ReleaseWorkbench current={decision} />
+        {decision.supersedes && <p className="receipt-predecessor">This receipt follows <a href={`?decision=${encodeURIComponent(decision.supersedes)}`}>{decision.supersedes}</a>. The earlier decision and its evidence remain intact.</p>}
 
         {drifted && comparison && (
           <section className="truth-pair" aria-label="Recorded and current release states">
@@ -463,8 +451,8 @@ export default function App() {
                 Draft escalation memo
               </Button>
               {drifted && (
-                <a className="text-button" href={`?decision=${CURRENT_DECISION_ID}#top`}>
-                  Open the current recorded decision <ArrowRight size={15} />
+                <a className="text-button" href="#workbench" onClick={() => { const panel = document.querySelector<HTMLDetailsElement>("#workbench"); if (panel) panel.open = true; }}>
+                  Evaluate a follow-up decision <ArrowRight size={15} />
                 </a>
               )}
             </div>
@@ -581,7 +569,7 @@ export default function App() {
             <div className="record-header">
               <div>
                 <span className="record-number">{decision.decision_id}</span>
-                <h3>Can North Star be available in Nigeria on {formatDate(decision.effective_at)}?</h3>
+                <h3>Can {decision.title_id} be available in {decision.territory_code} at {formatReleaseInstant(decision.effective_at)}?</h3>
               </div>
               <Tag type={gateTone}>{decision.outcome}</Tag>
             </div>
