@@ -221,8 +221,46 @@ claim that this establishes a unique approved head.
 `expected_preview_token` to `POST /api/decisions`, with optional `supersedes`.
 These fields are optional for existing API callers. The fingerprint is a
 consistency check, not an authentication token. The public dataset remains
-synthetic; private studio onboarding, access control, imports and reviewer
-assignment are not provided by this workbench.
+synthetic; private studio onboarding, imports and reviewer assignment are not
+provided by this workbench.
+
+### Private workspace API access
+
+The optional private mode protects this API deployment with individually issued
+bearer credentials. It is **one workspace per isolated deployment and ClickHouse
+service**, not shared-database tenant isolation. The workspace ID is an identity
+label, not a SQL filter. Never point a private studio deployment at the public
+synthetic service or another studio's database. Database provisioning and browser
+sign-in are not automated by this change; the existing console does not yet send
+credentials. Use an authenticated API client for this mode.
+
+Set these in the process environment (not `api/.env`): `SDL_ACCESS_MODE=private`,
+`SDL_WORKSPACE_ID` to a stable alphanumeric/hyphen/underscore identifier, and
+`SDL_ACCESS_KEYS` to a JSON array of objects with exactly `sha256`, `subject` and
+`role` fields. Generate each credential with `secrets.token_urlsafe(32)` in a
+trusted provisioning environment; distribute the raw secret securely to its
+owner, and configure only its lowercase SHA-256 hex digest. Roles are `reader`
+or `operator`. Never put raw credentials in source, URLs, browser storage, shell
+history or logs. Serve only over HTTPS. Replace/remove the digest and restart
+all instances to rotate/revoke a credential; there is no session or expiry store.
+
+Clients send `Authorization: Bearer <credential>` on every API request.
+`GET /api/workspace/session` reports the authenticated subject, role and workspace
+without exposing credentials. Readers can browse, preview, compare, verify, probe
+and inspect/recheck resolution plans. Operators can additionally record decisions
+and generate memos. New endpoints require operator permission by default. Missing
+or invalid credentials return 401; insufficient authority returns 403, before
+data/model dependencies run. Authentication identity is not yet persisted into
+historical decision receipts; this is access control, not an actor audit trail.
+
+Private mode disables cross-origin access and the public API documentation routes.
+Static assets and the minimal `/api/health` response remain public. The remote
+agent endpoint returns 503 even for operators because its separately deployed
+data/session store has not been workspace-isolated. Do not reuse that external
+agent for private data. Misconfigured private mode fails application construction.
+The default remains `public` for compatibility with the existing synthetic release;
+workspace configuration supplied in public mode is rejected to catch accidental
+downgrades. No production configuration is changed by adding this feature.
 
 Both required integrations are load-bearing, not decorative:
 

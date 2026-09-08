@@ -18,12 +18,13 @@ from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from sdl.canonical import canonical_rows
+from sdl.access import WorkspaceAccess
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import list_decisions, release_catalogue, read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPWorkerPool, MCPQueryError, QueryMeasurement
@@ -270,17 +271,42 @@ def _runtime_integrity_probe(executor, record, snapshot) -> dict:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Studio Decision Ledger", version="0.1.0")
+    access = WorkspaceAccess()
+    app = FastAPI(
+        title="Studio Decision Ledger", version="0.1.0",
+        dependencies=[Depends(access.authorize)],
+        docs_url=None if access.mode == "private" else "/docs",
+        redoc_url=None if access.mode == "private" else "/redoc",
+        openapi_url=None if access.mode == "private" else "/openapi.json",
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["*"] if access.mode == "public" else [],
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    if access.mode == "private":
+        @app.middleware("http")
+        async def private_response_cache(request: Request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/api/"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+
     @app.get("/api/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/api/workspace/session")
+    def workspace_session(request: Request) -> dict:
+        principal = getattr(request.state, "principal", None)
+        return {
+            "mode": access.mode,
+            "workspace_id": access.workspace or None,
+            "subject": principal.subject if principal else None,
+            "role": principal.role if principal else None,
+        }
 
     @app.post("/api/decisions", status_code=201)
     def create_decision(
