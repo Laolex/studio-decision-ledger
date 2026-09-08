@@ -5,7 +5,7 @@ import {
   type DecisionPayload, type DecisionSummary, type PreviewPayload,
 } from "./api";
 
-export default function ReleaseWorkbench({ current }: { current?: DecisionPayload }) {
+export default function ReleaseWorkbench({ current, privateWorkspace = false, canRecord = true }: { current?: DecisionPayload; privateWorkspace?: boolean; canRecord?: boolean }) {
   const [title, setTitle] = useState(current?.title_id ?? "");
   const [territory, setTerritory] = useState(current?.territory_code ?? "");
   const [date, setDate] = useState(current?.effective_at.slice(0, 19) ?? "");
@@ -61,7 +61,7 @@ export default function ReleaseWorkbench({ current }: { current?: DecisionPayloa
       <summary>Evaluate a release and browse decision history</summary>
       <div className="workbench-body">
         <h2>Choose the release to evaluate</h2>
-        <p>Preview the evidence first. Recording creates a permanent receipt. The public dataset contains fictional titles and evidence.</p>
+        <p>Preview the evidence first. Recording creates a permanent receipt. {privateWorkspace ? "This workspace uses your imported evidence and the configured SDL baseline policy." : "The public dataset contains fictional titles and evidence."}</p>
         {catalogueError && <p role="status">{catalogueError}</p>}
         <form onSubmit={evaluate}>
           {current && <label className="follow-up-choice">
@@ -91,7 +91,7 @@ export default function ReleaseWorkbench({ current }: { current?: DecisionPayloa
           <p>{preview.blocking_condition || "All conditions in the selected policy are met."}</p>
           <p>{preview.title_id} · {preview.territory_code} · {preview.effective_at} · {preview.policy_revision} · evidence revision {preview.max_revision}</p>
           <ul>{preview.evidence_groups.map(group => <li key={group.label}><b>{group.label}:</b> {group.summary}</li>)}</ul>
-          <Button onClick={() => void record()} disabled={Boolean(busy)}>Record {preview.outcome} decision</Button>
+          {canRecord ? <Button onClick={() => void record()} disabled={Boolean(busy)}>Record {preview.outcome} decision</Button> : <p>Reader access: ask an operator to record this decision.</p>}
           <p>The service checks the evidence again before recording. Changed evidence requires a new preview.</p>
         </section>}
         <section className="workbench-history" aria-label="Recorded decisions">

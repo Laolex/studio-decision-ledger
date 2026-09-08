@@ -11,6 +11,7 @@ it supersedes.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -100,15 +101,17 @@ def write_decision(writer: Writer, record: DecisionRecord, query_evidence: list 
             prompt_template_revision=record.prompt_template_revision,
             decided_at=record.decided_at,
             supersedes=record.supersedes,
+            recorded_by=record.recorded_by,
         )
     )
 
 
 def read_decision(executor: Executor, decision_id: str) -> DecisionRecord | None:
+    actor_column = ", recorded_by" if os.getenv("SDL_WORKSPACE_STATE_DIR") else ""
     rows = executor(
         "SELECT decision_id, title_id, territory_code, effective_at, policy_revision, "
         "policy_sha256, snapshot_id, outcome, rule_hits, model_rationale, model_config, "
-        "prompt_template_revision, decided_at, supersedes "
+        f"prompt_template_revision, decided_at, supersedes{actor_column} "
         f"FROM sdl.decision_records WHERE decision_id = {_quote(decision_id)} LIMIT 1"
     )
     if not rows:
@@ -129,6 +132,7 @@ def read_decision(executor: Executor, decision_id: str) -> DecisionRecord | None
         model_config=row["model_config"],
         prompt_template_revision=row["prompt_template_revision"],
         supersedes=row["supersedes"],
+        recorded_by=row.get("recorded_by", ""),
     )
 
 

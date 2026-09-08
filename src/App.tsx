@@ -58,6 +58,7 @@ const GROUP_ICONS: Record<string, ReactElement> = {
 };
 
 function StatusMark({ tone }: { tone: Tone }) {
+  if (tone === "unknown") return <Time size={16} aria-label="Not established" />;
   return tone === "hold" ? (
     <WarningFilled className="status-icon hold" size={16} aria-label="Needs attention" />
   ) : (
@@ -79,7 +80,7 @@ function outcomeCopy(outcome: string): string {
   return "A mandatory release condition is not met. The release stays paused until the blocking condition is resolved or an approved exception is recorded.";
 }
 
-export default function App() {
+export default function App({privateWorkspace = false, canRecord = true}: {privateWorkspace?: boolean; canRecord?: boolean}) {
   const [decision, setDecision] = useState<DecisionPayload | null>(null);
   const [loadError, setLoadError] = useState<string>("");
 
@@ -221,7 +222,7 @@ export default function App() {
               <p className="subtitle">{loadError}</p>
             </div>
           </div>
-          <ReleaseWorkbench />
+          <ReleaseWorkbench privateWorkspace={privateWorkspace} canRecord={canRecord} />
         </section>
       </main>
     );
@@ -251,7 +252,7 @@ export default function App() {
   const isHistoricalDecision = decision.decision_id === DEMO_DECISION_ID;
 
   return (
-    <main className="shell with-agent">
+    <main className={privateWorkspace ? "shell" : "shell with-agent"}>
       <aside className="sidebar" aria-label="Primary navigation">
         <a className="brand" href="#top" aria-label="Studio Decision Ledger home">
           <span className="brand-mark"><span /></span>
@@ -269,7 +270,7 @@ export default function App() {
           <a href="#settings" className="settings-link"><Settings size={16} /> Workspace settings</a>
           <div className="workspace-switcher">
             <span className="workspace-avatar">NS</span>
-            <span><b>Public catalogue</b><small>Synthetic evidence</small></span>
+            <span><b>{privateWorkspace ? "Private workspace" : "Public catalogue"}</b><small>{privateWorkspace ? "Imported studio evidence" : "Synthetic evidence"}</small></span>
             <ChevronDown size={16} aria-hidden="true" />
           </div>
         </div>
@@ -302,7 +303,8 @@ export default function App() {
           </div>
         </div>
 
-        <ReleaseWorkbench current={decision} />
+        {decision.recorded_by && <p>Recorded by {decision.recorded_by}</p>}
+        <ReleaseWorkbench current={decision} privateWorkspace={privateWorkspace} canRecord={canRecord} />
         {decision.supersedes && <p className="receipt-predecessor">This receipt follows <a href={`?decision=${encodeURIComponent(decision.supersedes)}`}>{decision.supersedes}</a>. The earlier decision and its evidence remain intact.</p>}
 
         {drifted && comparison && (
@@ -447,7 +449,7 @@ export default function App() {
               )}
             </div>
             <div className="drift-actions">
-              <Button kind="secondary" renderIcon={Document} onClick={openMemo}>
+              <Button kind="secondary" renderIcon={Document} onClick={openMemo} disabled={privateWorkspace || !canRecord}>
                 Draft escalation memo
               </Button>
               {drifted && (
@@ -542,7 +544,7 @@ export default function App() {
                   <span className="source-icon">{GROUP_ICONS[group.label]}</span>
                   <h3>{group.label}</h3>
                 </div>
-                <Tag type={group.tone === "hold" ? "red" : "green"}>{group.summary}</Tag>
+                <Tag type={group.tone === "clear" ? "green" : group.tone === "hold" ? "red" : "gray"}>{group.summary}</Tag>
               </div>
               <div className="evidence-list">
                 {group.items.map((item) => (
@@ -612,7 +614,7 @@ export default function App() {
         </section>
       </section>
 
-      <AgentPanel />
+      {!privateWorkspace && <AgentPanel />}
 
       <Modal
         open={showReplay}
