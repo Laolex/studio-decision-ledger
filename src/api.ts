@@ -2,7 +2,7 @@
 // they drift, that is a bug in one of the two, not something to paper over
 // with `any`.
 
-export type Tone = "clear" | "hold";
+export type Tone = "clear" | "hold" | "unknown";
 
 export interface EvidenceItem {
   name: string;
@@ -18,6 +18,7 @@ export interface EvidenceGroup {
 }
 
 export interface DecisionPayload {
+  recorded_by?: string;
   supersedes: string;
   decision_id: string;
   title_id: string;
@@ -70,12 +71,13 @@ export interface ComparisonPayload {
   record_unchanged: boolean;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("sdl-session-expired"));
     const body = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${body.slice(0, 300)}`);
   }

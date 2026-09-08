@@ -46,6 +46,7 @@ class DecisionRecord:
     model_config: str = ""
     prompt_template_revision: str = ""
     supersedes: str = ""
+    recorded_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ def decision_insert_sql(
     prompt_template_revision: str,
     decided_at: datetime,
     supersedes: str = "",
+    recorded_by: str = "",
 ) -> str:
     hits = "[" + ", ".join(_quote(hit) for hit in rule_hits) + "]"
     values = ", ".join(
@@ -153,10 +155,12 @@ def decision_insert_sql(
             _quote(supersedes),
         ]
     )
+    actor_column = ", recorded_by" if recorded_by else ""
+    actor_value = ", " + _quote(recorded_by) if recorded_by else ""
     return (
         "INSERT INTO sdl.decision_records "
         "(decision_id, title_id, territory_code, effective_at, policy_revision, "
         "policy_sha256, snapshot_id, outcome, rule_hits, query_evidence, "
-        "model_rationale, model_config, prompt_template_revision, decided_at, supersedes) "
-        f"VALUES ({values})"
+        f"model_rationale, model_config, prompt_template_revision, decided_at, supersedes{actor_column}) "
+        f"VALUES ({values}{actor_value})"
     )

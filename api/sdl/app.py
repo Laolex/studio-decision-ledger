@@ -18,14 +18,14 @@ from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from sdl.canonical import canonical_rows
-from sdl.access import WorkspaceAccess
-from sdl.imports import ImportPreflightBody, preflight_licenses
+from sdl.access import WorkspaceAccess, COOKIE
+from sdl.imports import ImportPreflightBody, preflight_licenses, IMPORT_MODELS
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import list_decisions, release_catalogue, read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPWorkerPool, MCPQueryError, QueryMeasurement
@@ -60,7 +60,7 @@ def load_env() -> dict[str, str]:
         for key, value in os.environ.items()
         if key.startswith("CLICKHOUSE_")
     }
-    if ENV_PATH.exists():
+    if ENV_PATH.exists() and not os.getenv("SDL_WORKSPACE_STATE_DIR"):
         for line in ENV_PATH.read_text().splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -78,7 +78,7 @@ def _http_call(env: dict[str, str], sql: str, want_rows: bool) -> list[dict]:
     ).decode()
     body = f"{sql} FORMAT JSONEachRow" if want_rows else sql
     request = urllib.request.Request(
-        f"https://{host}:{port}/",
+        f"{'http' if env.get('CLICKHOUSE_SECURE', 'true').lower() == 'false' else 'https'}://{host}:{port}/",
         data=body.encode("utf-8"),
         headers={"Authorization": f"Basic {credentials}"},
         method="POST",
@@ -104,6 +104,10 @@ def get_executor():
                 size = int(os.getenv("SDL_MCP_WORKER_POOL_SIZE", "2"))
                 _mcp_executor = ClickHouseMCPWorkerPool(load_env(), size=size)
                 _mcp_call = _mcp_executor.__enter__()
+    if os.getenv("SDL_WORKSPACE_STATE_DIR"):
+        identity = _mcp_call("SELECT workspace_id FROM sdl.workspace_identity")
+        if identity != [{"workspace_id": os.environ["SDL_WORKSPACE_ID"]}]:
+            raise HTTPException(503, "Evidence service workspace identity mismatch")
     return _mcp_call
 
 
@@ -136,6 +140,8 @@ def get_rationale_model():
     Raising here would make a missing environment variable look like a failure
     to decide.
     """
+    if os.getenv("SDL_WORKSPACE_STATE_DIR"):
+        return None  # Private evidence is not sent to a model by default.
     try:
         return GeminiRationaleModel(
             vertex_client(),
@@ -150,6 +156,13 @@ def get_rationale_model():
 def get_writer():
     """Writes never travel over MCP — SPEC invariant 13."""
     env = load_env()
+    if os.getenv("SDL_WORKSPACE_STATE_DIR") and (
+        not env.get("CLICKHOUSE_WRITE_USER") or not env.get("CLICKHOUSE_WRITE_PASSWORD")
+        or env["CLICKHOUSE_WRITE_USER"] == env.get("CLICKHOUSE_USER")
+    ):
+        raise HTTPException(503, "Private writes require a separate restricted ClickHouse writer identity")
+    if env.get("CLICKHOUSE_WRITE_USER"):
+        env = {**env, "CLICKHOUSE_USER": env["CLICKHOUSE_WRITE_USER"], "CLICKHOUSE_PASSWORD": env["CLICKHOUSE_WRITE_PASSWORD"]}
 
     def write(sql: str) -> None:
         _http_call(env, sql, want_rows=False)
@@ -175,6 +188,16 @@ class AgentAskBody(BaseModel):
     session_id: str | None = None
 
 
+class WorkspaceLoginBody(BaseModel):
+    credential: str = Field(min_length=32, max_length=512)
+
+
+class ImportCommitBody(ImportPreflightBody):
+    expected_head: int = Field(ge=0)
+    content_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    allow_corrections: bool = False
+
+
 def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
     return {
         "decision_id": record.decision_id,
@@ -193,6 +216,7 @@ def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
         "evidence_bindings": list(snapshot.facts),
         "model_rationale": record.model_rationale,
         "supersedes": record.supersedes,
+        "recorded_by": record.recorded_by,
         "evidence_groups": evidence_groups(facts, decision, record.policy_revision),
     }
 
@@ -293,11 +317,43 @@ def create_app() -> FastAPI:
             response = await call_next(request)
             if request.url.path.startswith("/api/"):
                 response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "same-origin"
             return response
 
     @app.get("/api/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/api/workspace/config")
+    def workspace_config():
+        return {"mode": access.mode, "browser_login": access.store is not None}
+
+    @app.post("/api/workspace/login")
+    def workspace_login(body: WorkspaceLoginBody, request: Request, response: Response):
+        if access.store is None:
+            raise HTTPException(503, "Browser sign-in is not configured")
+        access.require_origin(request)
+        access.store.login_attempt(request.client.host if request.client else "unknown")
+        digest = access.store.digest(body.credential)
+        principal = access.principal_for(digest)
+        if principal is None:
+            raise HTTPException(401, "Invalid studio access key")
+        previous = request.cookies.get(COOKIE)
+        if previous:
+            access.store.logout(previous)
+        token = access.store.session(digest)
+        response.set_cookie(COOKIE, token, max_age=28800, secure=True, httponly=True, samesite="strict", path="/")
+        return {"workspace_id": access.workspace, "subject": principal.subject, "role": principal.role, "mode": "private"}
+
+    @app.post("/api/workspace/logout")
+    def workspace_logout(request: Request, response: Response):
+        if access.store:
+            access.require_origin(request)
+            access.store.logout(request.cookies.get(COOKIE, ""))
+        response.delete_cookie(COOKIE, secure=True, httponly=True, samesite="strict", path="/")
+        return {"signed_out": True}
 
     @app.get("/api/workspace/session")
     def workspace_session(request: Request) -> dict:
@@ -314,13 +370,45 @@ def create_app() -> FastAPI:
         if access.mode != "private":
             raise HTTPException(403, "Evidence import preflight requires private workspace mode")
         try:
-            return preflight_licenses(body)
+            result = preflight_licenses(body)
+            if access.store:
+                return access.store.review(result, get_executor())
+            return result
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
+
+    @app.get("/api/imports/templates")
+    def import_templates():
+        return {"templates": [{"table": table, "columns": list(model.model_fields), "required": [name for name, field in model.model_fields.items() if field.is_required()]} for table, model in IMPORT_MODELS.items()]}
+
+    @app.get("/api/imports")
+    def import_history():
+        if access.store is None:
+            raise HTTPException(503, "Durable workspace storage is not configured")
+        return {"imports": [{key: value for key, value in receipt.items() if key != "rows"} | {"row_count": len(receipt["rows"])} for receipt in access.store.receipts()]}
+
+    @app.post("/api/imports", status_code=201)
+    def commit_import(body: ImportCommitBody, request: Request):
+        if access.store is None:
+            raise HTTPException(503, "Durable workspace storage is not configured")
+        try:
+            reviewed = preflight_licenses(ImportPreflightBody(**body.model_dump(include={"table", "source_reference", "csv_text"})))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        if not reviewed["valid"] or reviewed["content_sha256"] != body.content_sha256:
+            raise HTTPException(409, "File differs from the validated preview. Review it again.")
+        return access.store.publish(reviewed, body.expected_head, body.allow_corrections, request.state.principal.subject, get_executor(), get_writer())
+
+    @app.post("/api/imports/{import_id}/retry")
+    def retry_import(import_id: str):
+        if access.store is None:
+            raise HTTPException(503, "Durable workspace storage is not configured")
+        return access.store.retry(import_id, get_executor(), get_writer())
 
     @app.post("/api/decisions", status_code=201)
     def create_decision(
         body: RecordDecisionBody,
+        request: Request,
         executor=Depends(get_executor),
         writer=Depends(get_writer),
         model=Depends(get_rationale_model),
@@ -338,6 +426,7 @@ def create_app() -> FastAPI:
                 model=model,
                 supersedes=body.supersedes,
                 expected_preview_token=body.expected_preview_token,
+                recorded_by=request.state.principal.subject if access.store else "",
             )
         except DecisionConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error

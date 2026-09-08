@@ -224,79 +224,135 @@ consistency check, not an authentication token. The public dataset remains
 synthetic; private studio onboarding, imports and reviewer assignment are not
 provided by this workbench.
 
-### Private workspace API access
+### Private studio onboarding
 
-The optional private mode protects this API deployment with individually issued
-bearer credentials. It is **one workspace per isolated deployment and ClickHouse
-service**, not shared-database tenant isolation. The workspace ID is an identity
-label, not a SQL filter. Never point a private studio deployment at the public
-synthetic service or another studio's database. Database provisioning and browser
-sign-in are not automated by this change; the existing console does not yet send
-credentials. Use an authenticated API client for this mode.
+An administrator provisions one isolated studio deployment, issues individual
+reader/operator keys, and gives members its HTTPS URL. Members sign in, upload
+UTF-8 CSV evidence, review normalized records and prior values, explicitly approve
+corrections, publish an import receipt, then preview and record a release decision.
+All seven evidence types are supported. Readers can inspect and evaluate but cannot
+import or record. This is administrator-managed access, not public signup, SSO,
+email invitations or a multi-tenant hosting service.
 
-Set these in the process environment (not `api/.env`): `SDL_ACCESS_MODE=private`,
-`SDL_WORKSPACE_ID` to a stable alphanumeric/hyphen/underscore identifier, and
-`SDL_ACCESS_KEYS` to a JSON array of objects with exactly `sha256`, `subject` and
-`role` fields. Generate each credential with `secrets.token_urlsafe(32)` in a
-trusted provisioning environment; distribute the raw secret securely to its
-owner, and configure only its lowercase SHA-256 hex digest. Roles are `reader`
-or `operator`. Never put raw credentials in source, URLs, browser storage, shell
-history or logs. Serve only over HTTPS. Replace/remove the digest and restart
-all instances to rotate/revoke a credential; there is no session or expiry store.
+Private mode needs a **dedicated ClickHouse service and one durable local
+coordination directory on one host**. Do not point it at the public dataset or
+another studio. Multiple workers on that host share the same directory and file
+lock; independent hosts, network filesystems and ephemeral Cloud Run instances
+are unsupported. The API refuses workspace state on Cloud Run. The workspace
+identity marker must match before evidence reads or imports. Private runtime
+credentials come only from process configuration, never the repository's
+`api/.env`.
 
-Clients send `Authorization: Bearer <credential>` on every API request.
-`GET /api/workspace/session` reports the authenticated subject, role and workspace
-without exposing credentials. Readers can browse, preview, compare, verify, probe
-and inspect/recheck resolution plans. Operators can additionally record decisions
-and generate memos. New endpoints require operator permission by default. Missing
-or invalid credentials return 401; insufficient authority returns 403, before
-data/model dependencies run. Authentication identity is not yet persisted into
-historical decision receipts; this is access control, not an actor audit trail.
+#### Administrator setup
 
-Private mode disables cross-origin access and the public API documentation routes.
-Static assets and the minimal `/api/health` response remain public. The remote
-agent endpoint returns 503 even for operators because its separately deployed
-data/session store has not been workspace-isolated. Do not reuse that external
-agent for private data. Misconfigured private mode fails application construction.
-The default remains `public` for compatibility with the existing synthetic release;
-workspace configuration supplied in public mode is rejected to catch accidental
-downgrades. No production configuration is changed by adding this feature.
+Use `scripts/provision_private.py` with a fresh dedicated ClickHouse service.
+It refuses a nonempty `sdl` database. Supply `CLICKHOUSE_HOST`,
+`CLICKHOUSE_PORT`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`,
+`CLICKHOUSE_SECURE=true` in the process environment using an administrator
+connection. Run with `PYTHONPATH=api` and the API virtual environment:
 
-### Licence import preflight (no ingestion)
+```bash
+api/.venv/bin/python scripts/provision_private.py --workspace studio-alpha --confirm-empty-service --accept-baseline-policy
+```
 
-Private-workspace operators can call `POST /api/imports/preflight` with JSON
-containing `table: "title_licenses"`, a `source_reference` identifying the source
-document, and `csv_text`. This endpoint has no database reader or writer. Public
-mode and readers receive 403; anonymous private requests receive 401.
+Here `studio-alpha` is an example identifier, not a provisioned customer.
+The command creates the private-only schema and the existing POL-2026.08 baseline
+policy, **not any title evidence**. Review that SVOD policy's requirements with
+the studio before accepting it. The identity marker is written last; a partial
+setup stays unavailable and must be investigated rather than overlaid on public
+tables. The private schema uses ordinary evidence views over immutable import
+batches and adds `recorded_by` to private decision records. It is not a migration
+for the existing public service.
 
-The CSV requires exactly these columns, in any order: `license_id`, `title_id`,
-`territory_code`, `rights_scope`, `valid_from`, `valid_to`, `status`. An
-`amendment_note` column is optional. Revision and recorded-at columns are forbidden:
-they must eventually be assigned by a controlled ingestion path, not by the file.
-The limit is 256 KiB of UTF-8 and 500 data records. A UTF-8 BOM is accepted.
+Create a read-only runtime ClickHouse user with SELECT on this dedicated
+`sdl.*`, and a separate writer with INSERT only on `workspace_imports`,
+`decision_snapshots` and `decision_records`. Do not grant runtime DDL,
+UPDATE or DELETE. Configure the reader through `CLICKHOUSE_USER/PASSWORD`
+and the writer through `CLICKHOUSE_WRITE_USER/PASSWORD`. The write connection
+never goes through MCP. TLS is required outside a localhost-only test.
 
-Rights scopes are SVOD/AVOD/FAST/TVOD; statuses are ACTIVE/SUSPENDED/TERMINATED.
-Times require explicit ISO timezones and at most three fractional digits, with
-the end strictly after the start. The compatibility window is 1900–2299 UTC;
-the epoch sentinel used by SDL's existing resolver is rejected. Territory codes
-are checked for two uppercase letters, not verified against ISO membership.
-Duplicate title/territory/licence keys in one file fail validation.
+Issue each person's key with `scripts/issue_workspace_key.py --subject`,
+`--role reader|operator`, `--registry` and `--secret-file`; the last two
+must be absolute protected paths. The raw key is written once to a new 0600
+secret file, never printed. Deliver that file securely to its owner and remove
+the delivery copy afterward. The registry contains only hashes, subjects and
+roles. Use `--replace` with a new secret-file path to rotate a subject's keys.
+Remove a registry entry to revoke it. Restart **all** API workers after any
+registry change; removed hashes also invalidate their browser sessions.
 
-Envelope, header, CSV syntax and size errors return 422. Row validation returns
-200 with `valid: false`, structured issues, no normalized rows and no content
-hash. Issue row numbers count data records, not physical lines. Valid files return
-UTC-normalized, natural-key-sorted rows, an exact-input SHA-256 and a content hash
-binding the normalized rows, source reference, table and schema version. Equivalent
-row order and timezone representations share a content hash. Neither hash is an
-authorization credential or commit token. The source reference is caller-supplied
-metadata, not verified provenance.
+Set these process variables for the application: `SDL_ACCESS_MODE=private`,
+`SDL_WORKSPACE_ID` matching the provisioned marker, `SDL_ACCESS_KEYS_FILE`
+pointing at the protected registry, `SDL_WORKSPACE_STATE_DIR` pointing at a
+persistent local directory owned by the application user, and `SDL_PUBLIC_ORIGIN`
+as the exact HTTPS origin with no trailing slash or path. Bind the app behind
+that origin's TLS reverse proxy, with a 1 MiB request-body limit. Do not expose
+the database or the plain HTTP backend publicly. `SDL_ACCESS_KEYS` remains an
+alternative JSON environment value; configuring it alongside the file is rejected.
+Without a state directory, the older bearer-only API mode remains available.
 
-Every response says `recorded: false`. No revision is reserved, no existing keys
-or corrections are checked, and no facts are persisted. A valid file is not a
-verified licence or an approved release. Safe ingestion still requires atomic
-revision publication, retries/deduplication, conflict checks and actor attribution;
-other evidence types and browser upload/sign-in are not implemented here.
+Back up the ClickHouse service **and** the coordinator database before onboarding
+real data. Pause import publication while taking a consistent checkpoint and use
+SQLite's backup API, never copy a live .db file. Restore them as a matched pair;
+a head mismatch fails closed rather than reusing a revision. This repository does
+not configure a remote backup destination or a production timer automatically.
 
+#### Sessions and private data
+
+The browser exchanges its individual key for an opaque eight-hour Secure,
+HttpOnly, SameSite=Strict cookie. No key or session token is stored in browser
+localStorage/sessionStorage. Unsafe cookie requests must carry the exact configured
+Origin. Logout revokes the server-side session; key rotation/revocation is checked
+again on each request after workers reload the registry. Sign-in is rate-limited
+to ten attempts per client address per ten minutes. A trusted proxy setup must
+preserve correct client addressing. Private API responses use no-store; the
+health response, login entry and static assets contain no studio data.
+
+This follows the cookie and lifecycle principles in the
+[OWASP session guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+Private mode disables public API documentation, cross-origin access, the remote
+agent, model-generated decision rationale and memos. No private evidence is sent
+to those model services by this flow. Source references remain user assertions,
+not independent proof of rights or legal approval.
+
+#### Imports and receipts
+
+`GET /api/imports/templates` supplies column lists for licences, clearances,
+ratings, deliveries, continuity exceptions, synthetic-content declarations and
+performer consents. `POST /api/imports/preflight` accepts `table`,
+`source_reference` and `csv_text`. Files are bounded to 256 KiB UTF-8 and
+500 records, with strict fields, enums, explicit timezones, millisecond precision,
+interval validation and unique natural keys within a batch. Dates use the
+conservative 1900–2299 UTC compatibility window and reject SDL's epoch sentinel.
+Territory codes are syntax-checked, not checked against ISO membership.
+
+Envelope/CSV structural errors return 422. Row errors return `valid: false`,
+issues and no partial batch. Valid reviews return all normalized rows, an exact
+input hash, a normalized-content hash, prior values, correction count and the
+expected workspace head. Changing the file or source clears the browser review.
+Hashes are not authorization credentials.
+
+`POST /api/imports` revalidates the file and content hash, checks the reviewed
+head, and requires explicit correction approval plus amendment notes where existing
+values change. Each batch is a **single row** in an append-only ClickHouse event
+table; seven ordinary views read `FINAL` to coalesce identical network retries.
+A durable pending intent and an OS file lock serialize revisions. If a write's
+acknowledgement is lost, the original import remains pending and blocks new
+publication. `POST /api/imports/{import_id}/retry` reconciles the exact stored
+payload. A duplicate submission returns the original receipt and actor rather
+than allocating a new revision.
+
+Import receipts include actor, workspace, source reference, time, revision and
+hashes. History shows the latest 100 receipts, including pending work. A downloaded
+successful receipt includes its full normalized batch. Decision receipts persist
+their operator as `recorded_by`. The source's truth is still not certified merely
+because an import succeeded.
+
+Older decisions continue to read their pinned revisions. An isolated integration
+test imports all seven types through the real MCP read path, records AVAILABLE,
+imports a correction producing current HOLD, and verifies the original receipt
+as C2, including after duplicate batch delivery. Run the opt-in test only against
+the dedicated localhost test service described in
+`api/tests/test_private_integration.py`, never against production.
 Both required integrations are load-bearing, not decorative:
 
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing

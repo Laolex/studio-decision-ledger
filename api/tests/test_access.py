@@ -39,7 +39,7 @@ def auth(token):
 def test_every_existing_api_route_rejects_anonymous_before_dependencies(private_app):
     client = TestClient(private_app)
     for route in private_app.routes:
-        if not route.path.startswith("/api/") or route.path == "/api/health":
+        if not route.path.startswith("/api/") or route.path in {"/api/health", "/api/workspace/config", "/api/workspace/login"}:
             continue
         for method in route.methods:
             response = client.request(method, route.path.replace("{decision_id}", "D1846"))

@@ -171,7 +171,7 @@ def evidence_groups(facts: Facts, decision: Decision, policy_revision: str) -> l
         {"name": "Policy revision", "value": policy_revision, "tone": "clear"}
     ]
 
-    return [
+    groups = [
         {
             "label": "Rights & clearances",
             "tone": _tone(hits, {"LIC-001", "LIC-002", "CLR-001", "SYN-001", "CON-001"}),
@@ -191,6 +191,12 @@ def evidence_groups(facts: Facts, decision: Decision, policy_revision: str) -> l
             "items": policy_items,
         },
     ]
+    if decision.outcome == "ESCALATE":
+        # An absence of local rule hits is not proof of group readiness when
+        # the evaluator declined a determination for incomplete evidence.
+        for group in groups:
+            group.update(tone="unknown", summary="Readiness not established")
+    return groups
 
 
 def _summary(hits: list[str], owned: set[str]) -> str:
@@ -321,6 +327,7 @@ def make_decision(
     model=None,
     supersedes: str = "",
     expected_preview_token: str | None = None,
+    recorded_by: str = "",
 ) -> RecordedDecision:
     """Record a decision.
 
@@ -406,6 +413,7 @@ def make_decision(
         model_config=model_config,
         prompt_template_revision=template_revision,
         supersedes=supersedes,
+        recorded_by=recorded_by,
     )
 
     # Snapshot first: a decision naming a snapshot that does not exist would be

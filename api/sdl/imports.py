@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from sdl.retrieval import TABLE_KEYS
 
 
 class LicenseRow(BaseModel):
@@ -60,9 +61,110 @@ class LicenseRow(BaseModel):
         return self
 
 
+class EvidenceRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title_id: str = Field(min_length=1, max_length=200)
+    amendment_note: str = Field(default="", max_length=2000)
+
+    @field_validator("*")
+    @classmethod
+    def bounded_text(cls, value):
+        if isinstance(value, str) and (len(value) > 2000 or value != value.strip() or any(ord(c) < 32 for c in value)):
+            raise ValueError("Text must be trimmed, bounded to 2000 characters and contain no control characters")
+        return value
+
+    @field_validator("valid_from", "valid_to", "issued_at", "expires_at", "approved_at", mode="before", check_fields=False)
+    @classmethod
+    def timestamp(cls, value):
+        return LicenseRow.explicit_timestamp(value)
+
+    @model_validator(mode="after")
+    def interval(self):
+        for start, end in [("valid_from", "valid_to"), ("issued_at", "expires_at")]:
+            if hasattr(self, start) and getattr(self, end) <= getattr(self, start):
+                raise ValueError(f"{end} must be later than {start}")
+        return self
+
+
+class ClearanceRow(EvidenceRow):
+    clearance_id: str = Field(min_length=1, max_length=200)
+    asset_ref: str = Field(min_length=1, max_length=500)
+    clearance_kind: Literal["MUSIC_SYNC", "MUSIC_MASTER", "STOCK_FOOTAGE", "TALENT"]
+    territory_code: str = Field(pattern=r"^[A-Z]{2}$")
+    valid_from: datetime
+    valid_to: datetime
+    status: Literal["ACTIVE", "EXPIRED", "REVOKED"]
+
+
+class RatingRow(EvidenceRow):
+    rating_id: str = Field(min_length=1, max_length=200)
+    territory_code: str = Field(pattern=r"^[A-Z]{2}$")
+    rating_code: str = Field(min_length=1, max_length=100)
+    issued_at: datetime
+    expires_at: datetime
+    status: Literal["VALID", "EXPIRED", "WITHDRAWN"]
+
+
+class DeliveryRow(EvidenceRow):
+    delivery_id: str = Field(min_length=1, max_length=200)
+    master_version: str = Field(min_length=1, max_length=200)
+    approved_at: datetime | None
+    captions_state: Literal["APPROVED", "PENDING", "ABSENT"]
+    audio_description_state: Literal["APPROVED", "PENDING", "ABSENT"]
+
+    @field_validator("approved_at", mode="wrap")
+    @classmethod
+    def nullable_time(cls, value, handler):
+        return None if value == "" or value is None else handler(value)
+
+
+class ContinuityRow(EvidenceRow):
+    exception_id: str = Field(min_length=1, max_length=200)
+    scene_ref: str = Field(min_length=1, max_length=500)
+    severity: Literal["BLOCKING", "ADVISORY"]
+    state: Literal["OPEN", "RESOLVED", "WAIVED"]
+    resolution_ref: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def resolution(self):
+        if self.state != "OPEN" and not self.resolution_ref:
+            raise ValueError("Resolved or waived exceptions require a resolution_ref")
+        return self
+
+
+class SyntheticRow(EvidenceRow):
+    record_id: str = Field(min_length=1, max_length=200)
+    asset_ref: str = Field(min_length=1, max_length=500)
+    generation_kind: Literal["SYNTHETIC", "ASSISTED", "NONE"]
+    tool_ref: str = Field(max_length=500)
+    disclosure_obligation_ref: str = Field(max_length=500)
+
+
+class ConsentRow(EvidenceRow):
+    consent_id: str = Field(min_length=1, max_length=200)
+    performer_ref: str = Field(min_length=1, max_length=500)
+    consent_scope: Literal["likeness", "voice", "both"]
+    territory_code: str = Field(pattern=r"^[A-Z]{2}$")
+    valid_from: datetime
+    valid_to: datetime
+    status: Literal["ACTIVE", "WITHDRAWN", "EXPIRED"]
+
+
+IMPORT_MODELS = {
+    "title_licenses": LicenseRow, "clearances": ClearanceRow, "ratings": RatingRow,
+    "deliveries": DeliveryRow, "continuity_exceptions": ContinuityRow,
+    "synthetic_content": SyntheticRow, "performer_consents": ConsentRow,
+}
+
+
+def natural_key(table, row):
+    key, territorial = TABLE_KEYS[table]
+    return (row["title_id"], row["territory_code"], row[key]) if territorial else (row["title_id"], row[key])
+
+
 class ImportPreflightBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    table: Literal["title_licenses"]
+    table: Literal["title_licenses", "clearances", "ratings", "deliveries", "continuity_exceptions", "synthetic_content", "performer_consents"]
     source_reference: str = Field(min_length=1, max_length=500)
     csv_text: str = Field(min_length=1, max_length=262144)
 
@@ -79,8 +181,9 @@ def preflight_licenses(body: ImportPreflightBody) -> dict:
     if len(raw) > 262144:
         raise ValueError("CSV exceeds 256 KiB")
     reader = csv.reader(io.StringIO(body.csv_text.removeprefix("\ufeff"), newline=""), strict=True)
-    required = set(LicenseRow.model_fields) - {"amendment_note"}
-    allowed = set(LicenseRow.model_fields)
+    model = IMPORT_MODELS[body.table]
+    required = {name for name, field in model.model_fields.items() if field.is_required()}
+    allowed = set(model.model_fields)
     normalized, issues, seen = [], [], set()
     count = 0
     try:
@@ -94,12 +197,12 @@ def preflight_licenses(body: ImportPreflightBody) -> dict:
                 issues.append({"row": count, "field": "row", "message": "Column count does not match header"})
                 continue
             try:
-                row = LicenseRow.model_validate(dict(zip(header, cells)))
+                row = model.model_validate(dict(zip(header, cells)))
             except ValidationError as error:
                 for detail in error.errors(include_input=False, include_context=False, include_url=False):
                     issues.append({"row": count, "field": ".".join(map(str, detail["loc"])) or "row", "message": detail["msg"]})
                 continue
-            key = (row.title_id, row.territory_code, row.license_id)
+            key = natural_key(body.table, row.model_dump())
             if key in seen:
                 issues.append({"row": count, "field": "license_id", "message": "Duplicate natural key within this file"})
             seen.add(key)
@@ -109,7 +212,7 @@ def preflight_licenses(body: ImportPreflightBody) -> dict:
     if count == 0:
         raise ValueError("CSV has no data rows")
     # Do not expose a partial set as an importable batch.
-    rows = sorted(normalized, key=lambda row: (row["title_id"], row["territory_code"], row["license_id"])) if not issues else []
+    rows = sorted(normalized, key=lambda row: natural_key(body.table, row)) if not issues else []
     payload = {"schema_version": 1, "table": body.table, "source_reference": body.source_reference, "rows": rows}
     return {
         **payload, "valid": not issues, "recorded": False, "row_count": count,
