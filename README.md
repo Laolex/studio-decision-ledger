@@ -19,6 +19,11 @@ revision `sdl-00020-ghc`. The release passed 163 backend tests against ClickHous
 six-check production pre-flight, the five-arm negative control, and browser
 inspection of the deployed console. No schema migration was required.
 
+The private studio onboarding extension is merged and isolated-tested, but is not
+deployed to this public service. It requires a separate single-host deployment,
+dedicated ClickHouse service, HTTPS origin, administrator-issued keys and tested
+paired ClickHouse/SQLite backups.
+
 ## The problem
 
 When a title gets pulled in a territory, nobody can reconstruct why six weeks
@@ -484,6 +489,8 @@ Honest state of the build:
 - [x] Current-vs-historical comparison surface
 - [x] Hosted deployment — Cloud Run, console and API on one origin
 - [x] Release verification — 163 backend tests, six live pre-flight checks, production browser inspection
+- [x] Private studio onboarding implementation — seven evidence types, operator/reader roles, durable publication/retry and attributable receipts; isolated verification passed, not deployed
+- [ ] Private studio deployment — pending dedicated host, ClickHouse service, HTTPS origin, operator provisioning and tested paired backups
 
 ## Licence
 
