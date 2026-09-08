@@ -201,6 +201,29 @@ present. The reproduced outcome is identical either way.
 
 ## Runtime paths
 
+### Release workbench
+
+The console's release workbench accepts a title ID, territory and UTC release
+instant. Catalogue suggestions come from stored licence evidence. Previewing
+reads current evidence without writing a receipt; **Record decision** is an
+explicit subsequent action. A fingerprint binds the previewed request, policy
+and evidence, and recording returns HTTP 409 if they no longer match. Edit or
+preview again before retrying.
+
+The recent-history view lists up to fifty receipts for the selected title.
+Follow-up mode links a new receipt to the open receipt through `supersedes` and
+locks the title, territory and release instant. Earlier receipts remain readable
+and unchanged; multiple follow-ups can reference one predecessor. There is no
+claim that this establishes a unique approved head.
+
+`GET /api/catalogue` and `GET /api/decisions?title_id=…&limit=50` are read-only.
+`POST /api/evidence` returns `preview_token`; the workbench sends it as
+`expected_preview_token` to `POST /api/decisions`, with optional `supersedes`.
+These fields are optional for existing API callers. The fingerprint is a
+consistency check, not an authentication token. The public dataset remains
+synthetic; private studio onboarding, access control, imports and reviewer
+assignment are not provided by this workbench.
+
 Both required integrations are load-bearing, not decorative:
 
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing

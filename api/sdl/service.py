@@ -8,6 +8,7 @@ console never has to interpret a rule id.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from sdl.ledger import (
     Writer,
     current_max_revision,
     read_policy,
+    read_decision,
     write_decision,
     write_snapshot,
 )
@@ -69,7 +71,26 @@ class PreviewedDecision:
 
 
 def _timestamp_id(prefix: str, moment: datetime) -> str:
-    return f"{prefix}-{moment.strftime('%Y-%m-%d')}-{uuid4().hex[:4].upper()}"
+    return f"{prefix}-{moment.strftime('%Y-%m-%d')}-{uuid4().hex[:12].upper()}"
+
+
+class DecisionConflict(ValueError):
+    """The request no longer matches the evidence or receipt the user reviewed."""
+
+
+def preview_token(preview: PreviewedDecision, *, title_id: str, territory_code: str, effective_at: datetime) -> str:
+    return hashlib.sha256(canonical_json({
+        "request": [title_id, territory_code, effective_at.astimezone(timezone.utc).isoformat()],
+        "policy_sha256": preview.policy_sha256,
+        "policy_revision": preview.policy_revision,
+        "max_revision": preview.max_revision,
+        "outcome": preview.decision.outcome,
+        "rule_hits": list(preview.decision.rule_hits),
+        "evidence": [
+            [item.table_name, item.canonical_query, item.result_hash]
+            for item in preview.evidence
+        ],
+    }).encode()).hexdigest()
 
 
 def blocking_condition(decision: Decision) -> str:
@@ -298,6 +319,8 @@ def make_decision(
     decision_id: str | None = None,
     snapshot_id: str | None = None,
     model=None,
+    supersedes: str = "",
+    expected_preview_token: str | None = None,
 ) -> RecordedDecision:
     """Record a decision.
 
@@ -317,6 +340,14 @@ def make_decision(
     never a decision.
     """
     now = now or datetime.now(timezone.utc)
+    if supersedes:
+        prior = read_decision(executor, supersedes)
+        if prior is None:
+            raise DecisionConflict("The earlier decision does not exist.")
+        if (prior.title_id, prior.territory_code, prior.effective_at) != (
+            title_id, territory_code, effective_at
+        ):
+            raise DecisionConflict("A follow-up must concern the same title, territory and release date.")
     previewed = preview_decision(
         executor,
         title_id=title_id,
@@ -326,6 +357,10 @@ def make_decision(
         max_revision=max_revision,
     )
     decision = previewed.decision
+    if expected_preview_token is not None and preview_token(
+        previewed, title_id=title_id, territory_code=territory_code, effective_at=effective_at
+    ) != expected_preview_token:
+        raise DecisionConflict("Evidence or policy changed since the preview. Preview again before recording.")
     facts = previewed.facts
     evidence = previewed.evidence
     max_revision = previewed.max_revision
@@ -370,6 +405,7 @@ def make_decision(
         model_rationale=rationale,
         model_config=model_config,
         prompt_template_revision=template_revision,
+        supersedes=supersedes,
     )
 
     # Snapshot first: a decision naming a snapshot that does not exist would be

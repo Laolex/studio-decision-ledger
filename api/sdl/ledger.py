@@ -130,3 +130,30 @@ def read_decision(executor: Executor, decision_id: str) -> DecisionRecord | None
         prompt_template_revision=row["prompt_template_revision"],
         supersedes=row["supersedes"],
     )
+
+
+def list_decisions(executor: Executor, *, title_id: str = "", limit: int = 50) -> list[dict]:
+    """Bounded history, ordered deterministically; every receipt remains reachable."""
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    where = f" WHERE title_id = {_quote(title_id)}" if title_id else ""
+    rows = executor(
+        "SELECT decision_id, title_id, territory_code, effective_at, decided_at, "
+        "outcome, rule_hits, policy_revision, snapshot_id, supersedes "
+        f"FROM sdl.decision_records{where} "
+        f"ORDER BY decided_at DESC, decision_id DESC LIMIT {limit}"
+    )
+    return [
+        {**row, "effective_at": _parse(row["effective_at"]).isoformat(),
+         "decided_at": _parse(row["decided_at"]).isoformat()}
+        for row in rows
+    ]
+
+
+def release_catalogue(executor: Executor) -> list[dict]:
+    """Discover the title/territory pairs actually present in licence evidence."""
+    return executor(
+        "SELECT title_id, territory_code, max(revision) AS latest_license_revision "
+        "FROM sdl.title_licenses GROUP BY title_id, territory_code "
+        "ORDER BY title_id, territory_code LIMIT 1000"
+    )

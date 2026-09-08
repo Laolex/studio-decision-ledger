@@ -18,14 +18,14 @@ from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from sdl.canonical import canonical_rows
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
-from sdl.ledger import read_decision, read_policy, read_snapshot
+from sdl.ledger import list_decisions, release_catalogue, read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPWorkerPool, MCPQueryError, QueryMeasurement
 from sdl.mcp_executor import worker_package_version
 from sdl.resolve import canonical_result_hash, resolve_facts
@@ -35,12 +35,14 @@ from sdl.memo import draft_memo
 from sdl.agent_proxy import ask as agent_ask_engine
 from sdl.agent_proxy import resource_name as agent_resource_name
 from sdl.service import (
+    DecisionConflict,
     DEFAULT_POLICY_REVISION,
     blocking_condition,
     compare_recorded,
     evidence_groups,
     make_decision,
     preview_decision,
+    preview_token,
 )
 from sdl.verifier import verify
 from sdl.resolution import UnsupportedRule, build_resolution_plan
@@ -160,6 +162,11 @@ class DecisionRequestBody(BaseModel):
     policy_revision: str = DEFAULT_POLICY_REVISION
 
 
+class RecordDecisionBody(DecisionRequestBody):
+    supersedes: str = Field(default="", max_length=100)
+    expected_preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
 class AgentAskBody(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     # Threaded back by the console so a follow-up reaches the same session.
@@ -183,6 +190,7 @@ def _decision_payload(record, snapshot, decision: Decision, facts) -> dict:
         "retrieval_count": len(snapshot.facts),
         "evidence_bindings": list(snapshot.facts),
         "model_rationale": record.model_rationale,
+        "supersedes": record.supersedes,
         "evidence_groups": evidence_groups(facts, decision, record.policy_revision),
     }
 
@@ -276,7 +284,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/decisions", status_code=201)
     def create_decision(
-        body: DecisionRequestBody,
+        body: RecordDecisionBody,
         executor=Depends(get_executor),
         writer=Depends(get_writer),
         model=Depends(get_rationale_model),
@@ -284,18 +292,34 @@ def create_app() -> FastAPI:
         effective_at = body.effective_at
         if effective_at.tzinfo is None:
             effective_at = effective_at.replace(tzinfo=timezone.utc)
-        recorded = make_decision(
-            executor,
-            writer,
-            title_id=body.title_id,
-            territory_code=body.territory_code,
-            effective_at=effective_at,
-            policy_revision=body.policy_revision,
-            model=model,
-        )
+        try:
+            recorded = make_decision(
+                executor, writer,
+                title_id=body.title_id,
+                territory_code=body.territory_code,
+                effective_at=effective_at,
+                policy_revision=body.policy_revision,
+                model=model,
+                supersedes=body.supersedes,
+                expected_preview_token=body.expected_preview_token,
+            )
+        except DecisionConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         return _decision_payload(
             recorded.record, recorded.snapshot, recorded.decision, recorded.facts
         )
+
+    @app.get("/api/catalogue")
+    def get_catalogue(executor=Depends(get_executor)) -> dict:
+        return {"releases": release_catalogue(executor)}
+
+    @app.get("/api/decisions")
+    def get_decisions(
+        title_id: str = Query(default="", max_length=200),
+        limit: int = Query(default=50, ge=1, le=100),
+        executor=Depends(get_executor),
+    ) -> dict:
+        return {"decisions": list_decisions(executor, title_id=title_id, limit=limit)}
 
     @app.post("/api/agent/ask")
     def agent_ask(body: AgentAskBody, client=Depends(get_agent_client)) -> dict:
@@ -351,6 +375,7 @@ def create_app() -> FastAPI:
             "max_revision": previewed.max_revision,
             "retrieval_count": len(previewed.evidence),
             "recorded": False,
+            "preview_token": preview_token(previewed, title_id=body.title_id, territory_code=body.territory_code, effective_at=effective_at),
             "evidence_groups": evidence_groups(
                 previewed.facts, previewed.decision, previewed.policy_revision
             ),

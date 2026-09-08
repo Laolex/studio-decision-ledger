@@ -18,6 +18,7 @@ export interface EvidenceGroup {
 }
 
 export interface DecisionPayload {
+  supersedes: string;
   decision_id: string;
   title_id: string;
   territory_code: string;
@@ -85,11 +86,47 @@ export function recordDecision(input: {
   title_id: string;
   territory_code: string;
   effective_at: string;
+  policy_revision?: string;
+  supersedes?: string;
+  expected_preview_token?: string;
 }): Promise<DecisionPayload> {
   return request<DecisionPayload>("/api/decisions", {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export interface ReleaseInput {
+  title_id: string;
+  territory_code: string;
+  effective_at: string;
+}
+
+export interface PreviewPayload extends ReleaseInput {
+  outcome: DecisionPayload["outcome"];
+  rule_hits: string[];
+  blocking_condition: string;
+  policy_revision: string;
+  max_revision: number;
+  recorded: false;
+  preview_token: string;
+  evidence_groups: EvidenceGroup[];
+}
+
+export type DecisionSummary = Pick<DecisionPayload,
+  "decision_id" | "title_id" | "territory_code" | "effective_at" | "decided_at" |
+  "outcome" | "rule_hits" | "policy_revision" | "snapshot_id" | "supersedes">;
+
+export function getCatalogue(): Promise<{ releases: Array<{ title_id: string; territory_code: string }> }> {
+  return request("/api/catalogue");
+}
+
+export function getDecisionHistory(titleId = ""): Promise<{ decisions: DecisionSummary[] }> {
+  return request(`/api/decisions?limit=50&title_id=${encodeURIComponent(titleId)}`);
+}
+
+export function previewRelease(input: ReleaseInput): Promise<PreviewPayload> {
+  return request("/api/evidence", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getDecision(decisionId: string): Promise<DecisionPayload> {
@@ -199,6 +236,15 @@ export function formatDate(iso: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+export function formatReleaseInstant(iso: string): string {
+  // Keep the fractional precision present in the receipt; every displayed
+  // release instant is UTC regardless of the operator's browser timezone.
+  const instant = new Date(iso);
+  const date = instant.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+  const fraction = iso.match(/\.(\d+)/)?.[1]?.replace(/0+$/, "");
+  return `${date} ${instant.toISOString().slice(11, 19)}${fraction ? `.${fraction}` : ""} UTC`;
 }
 
 // The agent transcript. The tool call and the gate it returned are carried
