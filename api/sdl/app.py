@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from sdl.canonical import canonical_rows
 from sdl.access import WorkspaceAccess
+from sdl.imports import ImportPreflightBody, preflight_licenses
 from sdl.evaluator import Decision, evaluate, ReleaseRequest
 from sdl.ledger import list_decisions, release_catalogue, read_decision, read_policy, read_snapshot
 from sdl.mcp_executor import ClickHouseMCPWorkerPool, MCPQueryError, QueryMeasurement
@@ -307,6 +308,15 @@ def create_app() -> FastAPI:
             "subject": principal.subject if principal else None,
             "role": principal.role if principal else None,
         }
+
+    @app.post("/api/imports/preflight")
+    def import_preflight(body: ImportPreflightBody) -> dict:
+        if access.mode != "private":
+            raise HTTPException(403, "Evidence import preflight requires private workspace mode")
+        try:
+            return preflight_licenses(body)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @app.post("/api/decisions", status_code=201)
     def create_decision(
