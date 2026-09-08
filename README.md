@@ -262,6 +262,41 @@ The default remains `public` for compatibility with the existing synthetic relea
 workspace configuration supplied in public mode is rejected to catch accidental
 downgrades. No production configuration is changed by adding this feature.
 
+### Licence import preflight (no ingestion)
+
+Private-workspace operators can call `POST /api/imports/preflight` with JSON
+containing `table: "title_licenses"`, a `source_reference` identifying the source
+document, and `csv_text`. This endpoint has no database reader or writer. Public
+mode and readers receive 403; anonymous private requests receive 401.
+
+The CSV requires exactly these columns, in any order: `license_id`, `title_id`,
+`territory_code`, `rights_scope`, `valid_from`, `valid_to`, `status`. An
+`amendment_note` column is optional. Revision and recorded-at columns are forbidden:
+they must eventually be assigned by a controlled ingestion path, not by the file.
+The limit is 256 KiB of UTF-8 and 500 data records. A UTF-8 BOM is accepted.
+
+Rights scopes are SVOD/AVOD/FAST/TVOD; statuses are ACTIVE/SUSPENDED/TERMINATED.
+Times require explicit ISO timezones and at most three fractional digits, with
+the end strictly after the start. The compatibility window is 1900–2299 UTC;
+the epoch sentinel used by SDL's existing resolver is rejected. Territory codes
+are checked for two uppercase letters, not verified against ISO membership.
+Duplicate title/territory/licence keys in one file fail validation.
+
+Envelope, header, CSV syntax and size errors return 422. Row validation returns
+200 with `valid: false`, structured issues, no normalized rows and no content
+hash. Issue row numbers count data records, not physical lines. Valid files return
+UTC-normalized, natural-key-sorted rows, an exact-input SHA-256 and a content hash
+binding the normalized rows, source reference, table and schema version. Equivalent
+row order and timezone representations share a content hash. Neither hash is an
+authorization credential or commit token. The source reference is caller-supplied
+metadata, not verified provenance.
+
+Every response says `recorded: false`. No revision is reserved, no existing keys
+or corrections are checked, and no facts are persisted. A valid file is not a
+verified licence or an approved release. Safe ingestion still requires atomic
+revision publication, retries/deduplication, conflict checks and actor attribution;
+other evidence types and browser upload/sign-in are not implemented here.
+
 Both required integrations are load-bearing, not decorative:
 
 - **Google Cloud** — Gemini on Google Cloud Agent Builder is the operator-facing
